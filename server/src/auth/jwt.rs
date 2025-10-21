@@ -13,7 +13,7 @@ pub struct Claims {
 }
 
 pub fn create_token(
-    user_id: Uuid,
+    user_id: &str,
     email: &str,
     role: &str,
     jwt_secret: &str,

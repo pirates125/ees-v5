@@ -22,10 +22,7 @@ pub async fn update_profile_handler(
     Extension(claims): Extension<Claims>,
     Json(req): Json<UpdateProfileRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|e| ApiError::Unauthorized(format!("Invalid user ID: {}", e)))?;
-
-    let updated_user = users::update_user_profile(&state.db_pool, user_id, req.name, req.phone)
+    let updated_user = users::update_user_profile(&state.db_pool, &claims.sub, req.name, req.phone)
         .await
         .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
@@ -37,10 +34,7 @@ pub async fn change_password_handler(
     Extension(claims): Extension<Claims>,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|e| ApiError::Unauthorized(format!("Invalid user ID: {}", e)))?;
-
-    users::change_password(&state.db_pool, user_id, &req.current_password, &req.new_password)
+    users::change_password(&state.db_pool, &claims.sub, &req.current_password, &req.new_password)
         .await
         .map_err(|e| ApiError::Unauthorized(e.to_string()))?;
 

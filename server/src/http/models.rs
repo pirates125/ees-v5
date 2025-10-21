@@ -164,14 +164,14 @@ pub struct UserQuoteResponse {
     pub provider: String,
     pub premium: f64,
     pub status: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
     pub request_data: serde_json::Value,
 }
 
 impl From<crate::db::models::Quote> for UserQuoteResponse {
     fn from(q: crate::db::models::Quote) -> Self {
         Self {
-            id: q.id.to_string(),
+            id: q.id,
             provider: q.provider,
             premium: q.premium,
             status: q.status,

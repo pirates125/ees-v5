@@ -28,9 +28,9 @@ pub async fn create_user(
     .await
 }
 
-pub async fn get_user_by_id(pool: &DbPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
+pub async fn get_user_by_id(pool: &DbPool, id: &str) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(id.to_string())
+        .bind(id)
         .fetch_optional(pool)
         .await
 }
@@ -56,9 +56,9 @@ pub async fn list_users(pool: &DbPool, limit: i64, offset: i64) -> Result<Vec<Us
     .await
 }
 
-pub async fn update_last_login(pool: &DbPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn update_last_login(pool: &DbPool, user_id: &str) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = $1")
-        .bind(user_id.to_string())
+        .bind(user_id)
         .execute(pool)
         .await?;
     Ok(())
@@ -73,7 +73,7 @@ pub async fn count_users(pool: &DbPool) -> Result<i64, sqlx::Error> {
 
 pub async fn update_user_profile(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     name: Option<String>,
     phone: Option<String>,
 ) -> Result<User, sqlx::Error> {
@@ -94,14 +94,14 @@ pub async fn update_user_profile(
     )
     .bind(updated_name)
     .bind(updated_phone)
-    .bind(user_id.to_string())
+    .bind(user_id)
     .fetch_one(pool)
     .await
 }
 
 pub async fn change_password(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     current_password: &str,
     new_password: &str,
 ) -> Result<(), sqlx::Error> {
@@ -124,7 +124,7 @@ pub async fn change_password(
     // Update password
     sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
         .bind(new_hash)
-        .bind(user_id.to_string())
+        .bind(user_id)
         .execute(pool)
         .await?;
 

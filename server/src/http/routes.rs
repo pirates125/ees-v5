@@ -169,12 +169,9 @@ async fn quote_single_handler(
     let quote = provider.fetch_quote(request.clone()).await?;
     
     // Database'e kaydet
-    let user_id = Uuid::from_str(&claims.sub)
-        .map_err(|_| ApiError::Unknown("Geçersiz user ID".to_string()))?;
-    
     let _ = quotes::create_quote(
         &state.db_pool,
-        user_id,
+        &claims.sub,
         &quote.request_id,
         serde_json::to_value(&request).unwrap_or_default(),
         &quote.company,
@@ -198,13 +195,10 @@ async fn compare_quotes_handler(
     let quotes = state.aggregator.fetch_all_quotes(request.clone()).await?;
     
     // Database'e kaydet
-    let user_id = Uuid::from_str(&claims.sub)
-        .map_err(|_| ApiError::Unknown("Geçersiz user ID".to_string()))?;
-    
     for quote in &quotes {
         let _ = quotes::create_quote(
             &state.db_pool,
-            user_id,
+            &claims.sub,
             &quote.request_id,
             serde_json::to_value(&request).unwrap_or_default(),
             &quote.company,
@@ -234,14 +228,11 @@ async fn list_user_quotes_handler(
     Extension(claims): Extension<Claims>,
     Query(params): Query<PaginationParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = Uuid::from_str(&claims.sub)
-        .map_err(|_| ApiError::Unknown("Geçersiz user ID".to_string()))?;
-    
-    let quotes_list = quotes::list_quotes_by_user(&state.db_pool, user_id, params.limit, params.offset)
+    let quotes_list = quotes::list_quotes_by_user(&state.db_pool, &claims.sub, params.limit, params.offset)
         .await
         .map_err(|e| ApiError::Unknown(e.to_string()))?;
     
-    let total = quotes::count_quotes_by_user(&state.db_pool, user_id)
+    let total = quotes::count_quotes_by_user(&state.db_pool, &claims.sub)
         .await
         .map_err(|e| ApiError::Unknown(e.to_string()))?;
     
@@ -267,14 +258,8 @@ async fn create_policy_handler(
     Extension(claims): Extension<Claims>,
     Json(req): Json<CreatePolicyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = Uuid::from_str(&claims.sub)
-        .map_err(|_| ApiError::Unknown("Geçersiz user ID".to_string()))?;
-    
-    let quote_id = Uuid::from_str(&req.quote_id)
-        .map_err(|_| ApiError::FormValidation("Geçersiz quote ID".to_string()))?;
-    
     // Quote'u bul
-    let quote = quotes::get_quote_by_id(&state.db_pool, quote_id)
+    let quote = quotes::get_quote_by_id(&state.db_pool, &req.quote_id)
         .await
         .map_err(|e| ApiError::Unknown(e.to_string()))?
         .ok_or_else(|| ApiError::FormValidation("Quote bulunamadı".to_string()))?;
@@ -287,8 +272,8 @@ async fn create_policy_handler(
     
     let policy = policies::create_policy(
         &state.db_pool,
-        user_id,
-        Some(quote_id),
+        &claims.sub,
+        Some(&req.quote_id),
         &policy_number,
         &quote.provider,
         "trafik", // quote.response_data'dan alınabilir
@@ -303,10 +288,10 @@ async fn create_policy_handler(
     // Activity log
     let _ = logs::log_activity(
         &state.db_pool,
-        user_id,
+        &claims.sub,
         "policy_created",
         Some("policy"),
-        Some(policy.id),
+        Some(policy.id.clone()),
         Some(serde_json::json!({
             "provider": policy.provider,
             "premium": policy.premium,
@@ -323,10 +308,7 @@ async fn list_user_policies_handler(
     Extension(claims): Extension<Claims>,
     Query(params): Query<PaginationParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = Uuid::from_str(&claims.sub)
-        .map_err(|_| ApiError::Unknown("Geçersiz user ID".to_string()))?;
-    
-    let policies_list = policies::list_policies_by_user(&state.db_pool, user_id, params.limit, params.offset)
+    let policies_list = policies::list_policies_by_user(&state.db_pool, &claims.sub, params.limit, params.offset)
         .await
         .map_err(|e| ApiError::Unknown(e.to_string()))?;
     

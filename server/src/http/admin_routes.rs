@@ -52,10 +52,7 @@ pub async fn get_user_handler(
     _claims: Extension<Claims>,
     Path(user_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let uid = Uuid::from_str(&user_id)
-        .map_err(|_| ApiError::FormValidation("Geçersiz user ID".to_string()))?;
-    
-    let user = users::get_user_by_id(&state.db_pool, uid)
+    let user = users::get_user_by_id(&state.db_pool, &user_id)
         .await
         .map_err(|e| ApiError::Unknown(e.to_string()))?
         .ok_or_else(|| ApiError::FormValidation("Kullanıcı bulunamadı".to_string()))?;

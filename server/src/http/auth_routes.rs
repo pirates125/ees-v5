@@ -53,18 +53,18 @@ pub async fn login_handler(
     }
     
     // Last login güncelle
-    users::update_last_login(&state.db_pool, user.id)
+    users::update_last_login(&state.db_pool, &user.id)
         .await
         .ok();
     
     // JWT token oluştur
-    let token = create_token(user.id, &user.email, &user.role, &state.jwt_secret)
+    let token = create_token(&user.id, &user.email, &user.role, &state.jwt_secret)
         .map_err(|e| ApiError::Unknown(e.to_string()))?;
     
     let response = LoginResponse {
         token,
         user: UserInfo {
-            id: user.id.to_string(),
+            id: user.id.clone(),
             email: user.email,
             name: user.name,
             role: user.role,
@@ -100,13 +100,13 @@ pub async fn register_handler(
     })?;
     
     // Token oluştur
-    let token = create_token(user.id, &user.email, &user.role, &state.jwt_secret)
+    let token = create_token(&user.id, &user.email, &user.role, &state.jwt_secret)
         .map_err(|e| ApiError::Unknown(e.to_string()))?;
     
     let response = LoginResponse {
         token,
         user: UserInfo {
-            id: user.id.to_string(),
+            id: user.id.clone(),
             email: user.email,
             name: user.name,
             role: user.role,

@@ -4,20 +4,23 @@ use uuid::Uuid;
 
 pub async fn log_activity(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     action: &str,
     entity_type: Option<&str>,
-    entity_id: Option<Uuid>,
+    entity_id: Option<String>,
     metadata: Option<serde_json::Value>,
     ip_address: Option<&str>,
 ) -> Result<ActivityLog, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    
     sqlx::query_as::<_, ActivityLog>(
         r#"
-        INSERT INTO activity_logs (user_id, action, entity_type, entity_id, metadata, ip_address)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO activity_logs (id, user_id, action, entity_type, entity_id, metadata, ip_address)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         "#,
     )
+    .bind(id)
     .bind(user_id)
     .bind(action)
     .bind(entity_type)
@@ -30,7 +33,7 @@ pub async fn log_activity(
 
 pub async fn list_activity_logs(
     pool: &DbPool,
-    user_id: Option<Uuid>,
+    user_id: Option<&str>,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<ActivityLog>, sqlx::Error> {

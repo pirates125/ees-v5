@@ -1,22 +1,21 @@
 use crate::db::models::Policy;
 use crate::db::DbPool;
-use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
 pub async fn create_policy(
     pool: &DbPool,
-    user_id: Uuid,
-    quote_id: Option<Uuid>,
+    user_id: &str,
+    quote_id: Option<&str>,
     policy_number: &str,
     provider: &str,
     product_type: &str,
     premium: f64,
     commission: Option<f64>,
     policy_data: serde_json::Value,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<String>,
 ) -> Result<Policy, sqlx::Error> {
-    let id = Uuid::new_v4();
+    let id = Uuid::new_v4().to_string();
     
     sqlx::query_as::<_, Policy>(
         r#"
@@ -26,30 +25,30 @@ pub async fn create_policy(
         RETURNING *
         "#,
     )
-    .bind(id.to_string())
-    .bind(user_id.to_string())
-    .bind(quote_id.map(|id| id.to_string()))
+    .bind(id)
+    .bind(user_id)
+    .bind(quote_id)
     .bind(policy_number)
     .bind(provider)
     .bind(product_type)
     .bind(premium)
     .bind(commission)
     .bind(policy_data)
-    .bind(expires_at.map(|dt| dt.to_rfc3339()))
+    .bind(expires_at)
     .fetch_one(pool)
     .await
 }
 
-pub async fn get_policy_by_id(pool: &DbPool, id: Uuid) -> Result<Option<Policy>, sqlx::Error> {
+pub async fn get_policy_by_id(pool: &DbPool, id: &str) -> Result<Option<Policy>, sqlx::Error> {
     sqlx::query_as::<_, Policy>("SELECT * FROM policies WHERE id = $1")
-        .bind(id.to_string())
+        .bind(id)
         .fetch_optional(pool)
         .await
 }
 
 pub async fn list_policies_by_user(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Policy>, sqlx::Error> {
@@ -61,7 +60,7 @@ pub async fn list_policies_by_user(
         LIMIT $2 OFFSET $3
         "#,
     )
-    .bind(user_id.to_string())
+    .bind(user_id)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)

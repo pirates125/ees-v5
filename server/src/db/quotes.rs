@@ -5,14 +5,14 @@ use uuid::Uuid;
 
 pub async fn create_quote(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     request_id: &str,
     request_data: serde_json::Value,
     provider: &str,
     premium: f64,
     response_data: serde_json::Value,
 ) -> Result<Quote, sqlx::Error> {
-    let id = Uuid::new_v4();
+    let id = Uuid::new_v4().to_string();
     
     sqlx::query_as::<_, Quote>(
         r#"
@@ -21,8 +21,8 @@ pub async fn create_quote(
         RETURNING *
         "#,
     )
-    .bind(id.to_string())
-    .bind(user_id.to_string())
+    .bind(id)
+    .bind(user_id)
     .bind(request_id)
     .bind(request_data)
     .bind(provider)
@@ -32,16 +32,16 @@ pub async fn create_quote(
     .await
 }
 
-pub async fn get_quote_by_id(pool: &DbPool, id: Uuid) -> Result<Option<Quote>, sqlx::Error> {
+pub async fn get_quote_by_id(pool: &DbPool, id: &str) -> Result<Option<Quote>, sqlx::Error> {
     sqlx::query_as::<_, Quote>("SELECT * FROM quotes WHERE id = $1")
-        .bind(id.to_string())
+        .bind(id)
         .fetch_optional(pool)
         .await
 }
 
 pub async fn list_quotes_by_user(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Quote>, sqlx::Error> {
@@ -53,7 +53,7 @@ pub async fn list_quotes_by_user(
         LIMIT $2 OFFSET $3
         "#,
     )
-    .bind(user_id.to_string())
+    .bind(user_id)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
@@ -67,16 +67,16 @@ pub async fn count_quotes(pool: &DbPool) -> Result<i64, sqlx::Error> {
     Ok(row.get("count"))
 }
 
-pub async fn count_quotes_by_user(pool: &DbPool, user_id: Uuid) -> Result<i64, sqlx::Error> {
+pub async fn count_quotes_by_user(pool: &DbPool, user_id: &str) -> Result<i64, sqlx::Error> {
     let row = sqlx::query("SELECT COUNT(*) as count FROM quotes WHERE user_id = $1")
-        .bind(user_id.to_string())
+        .bind(user_id)
         .fetch_one(pool)
         .await?;
     Ok(row.get("count"))
 }
 
 // Alias for consistency with API naming
-pub async fn list_user_quotes(pool: &DbPool, user_id: Uuid) -> Result<Vec<Quote>, sqlx::Error> {
+pub async fn list_user_quotes(pool: &DbPool, user_id: &str) -> Result<Vec<Quote>, sqlx::Error> {
     list_quotes_by_user(pool, user_id, 100, 0).await
 }
 
