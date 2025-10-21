@@ -44,33 +44,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("   Headless: {}", config.headless);
     tracing::info!("   Session Dir: {}", config.session_dir);
     
-    // Database bağlantısı (opsiyonel - yoksa devam et)
-    let database_url = std::env::var("DATABASE_URL").ok();
-    let db_pool = if let Some(url) = &database_url {
-        tracing::info!("📊 Database'e bağlanılıyor...");
-        match create_pool(url).await {
-            Ok(pool) => {
-                tracing::info!("✅ Database bağlantısı başarılı");
-                
-                // Migration'ları çalıştır
-                if let Err(e) = run_migrations(&pool).await {
-                    tracing::warn!("⚠️ Migration hatası: {}", e);
-                } else {
-                    tracing::info!("✅ Migration'lar tamamlandı");
-                }
-                
-                Some(pool)
-            }
-            Err(e) => {
-                tracing::warn!("⚠️ Database bağlantısı başarısız: {}", e);
-                tracing::warn!("   Sistem database olmadan çalışacak");
-                None
-            }
-        }
-    } else {
-        tracing::info!("ℹ️  DATABASE_URL bulunamadı, database devre dışı");
-        None
-    };
+    // Database bağlantısı (ZORUNLU)
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("❌ DATABASE_URL environment variable gerekli! .env dosyasında DATABASE_URL=sqlite://eesigorta.db ekleyin.");
+    
+    tracing::info!("📊 Database'e bağlanılıyor: {}", database_url);
+    let db_pool = create_pool(&database_url).await
+        .expect("❌ Database bağlantısı başarısız!");
+    
+    tracing::info!("✅ Database bağlantısı başarılı");
+    
+    // Migration'ları çalıştır
+    if let Err(e) = run_migrations(&db_pool).await {
+        tracing::error!("❌ Migration hatası: {}", e);
+        panic!("Migration başarısız!");
+    }
+    
+    tracing::info!("✅ Migration'lar tamamlandı");
     
     // JWT secret
     let jwt_secret = std::env::var("JWT_SECRET")
@@ -94,19 +84,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Quote aggregator
     let aggregator = Arc::new(QuoteAggregator::new(registry.clone()));
     
-    // Database yoksa dummy pool oluştur (compile için)
-    let pool = db_pool.unwrap_or_else(|| {
-        tracing::warn!("⚠️ Dummy database pool kullanılıyor");
-        // Bu durumda auth route'lar çalışmayacak
-        unsafe { std::mem::zeroed() } // Dikkat: Bu sadece compile için, production'da kullanılmaz
-    });
-    
     // App state
     let state = AppState {
         config: config.clone(),
         registry,
         aggregator,
-        db_pool: pool,
+        db_pool,
         jwt_secret,
         start_time: SystemTime::now(),
     };
