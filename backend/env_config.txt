@@ -1,0 +1,19 @@
+# Sompo Sigorta Environment Variables
+# Bu dosyayı gerçek değerlerle doldurun
+
+# Sompo Login Bilgileri
+SOMPO_URL=https://ejento.somposigorta.com.tr/dashboard/login
+SOMPO_USER=BULUT1
+SOMPO_PASS=EEsigorta.2828
+SOMPO_SECRET_KEY=DD3JCJB7E7H25MB6BZ5IKXLKLJBZDQAO
+
+# Playwright Ayarları
+PLAYWRIGHT_HEADLESS=false  # Debug için false, production için true
+HTTP_PROXY=
+
+# Backend Ayarları
+FLASK_ENV=development
+FLASK_DEBUG=true
+
+# Database
+DATABASE_URL=sqlite:///app.db

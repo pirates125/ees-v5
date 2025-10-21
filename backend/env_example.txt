@@ -1,0 +1,19 @@
+# Sompo Sigorta Web Scraper Environment Variables
+# Bu dosyayı gerçek değerlerle doldurun
+
+# Sompo Login Bilgileri
+SOMPO_URL=https://ejento.somposigorta.com.tr/dashboard/login
+SOMPO_USER=your_username_here
+SOMPO_PASS=your_password_here
+SOMPO_SECRET_KEY=your_secret_key_here
+
+# Playwright Ayarları
+PLAYWRIGHT_HEADLESS=true
+HTTP_PROXY=
+
+# Backend Ayarları
+FLASK_ENV=development
+FLASK_DEBUG=true
+
+# Database (şimdilik SQLite kullanıyoruz)
+DATABASE_URL=sqlite:///app.db

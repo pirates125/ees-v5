@@ -1,0 +1,68 @@
+[package]
+name = "sigorta-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Browser automation
+fantoccini = "0.21"
+
+# OTP
+totp-lite = "2.0"
+
+# Decimal for precise currency handling
+rust_decimal = "1.33"
+rust_decimal_macros = "1.33"
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Environment
+dotenvy = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Regex
+regex = "1.10"
+
+# Session/Cache
+sled = "0.34"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate", "rust_decimal"] }
+
+# Password hashing
+
+argon2 = { version = "0.5", features = ["std"] }
+# JWT
+jsonwebtoken = "9.2"
+
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+
+[[bin]]
+name = "sigorta-server"
+path = "src/main.rs"
+

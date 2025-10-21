@@ -1,0 +1,96 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=sigorta_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - sigorta-network
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ChromeDriver
+  chromedriver:
+    image: robcherry/docker-chromedriver:latest
+    ports:
+      - "9515:9515"
+    privileged: true
+    shm_size: 2gb
+    environment:
+      - CHROMEDRIVER_WHITELISTED_IPS=""
+    networks:
+      - sigorta-network
+    restart: always
+
+  # Rust Backend
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8099:8099"
+    volumes:
+      - session-data:/data/sessions
+      - ./server/screenshots:/app/screenshots
+    depends_on:
+      - chromedriver
+      - postgres
+    env_file:
+      - ./server/.env
+    networks:
+      - sigorta-network
+    restart: always
+
+  # Next.js Frontend
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_APP_NAME=EE Sigorta
+      - NEXT_PUBLIC_API_URL=http://server:8099
+    depends_on:
+      - server
+    networks:
+      - sigorta-network
+    restart: always
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - client
+      - server
+    networks:
+      - sigorta-network
+    restart: always
+
+volumes:
+  session-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  sigorta-network:
+    driver: bridge

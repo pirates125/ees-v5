@@ -1,0 +1,64 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Data
+/data/
+*.sqlite
+*.db
+
+# Sessions
+/sessions/
+sompo_cookies.json
+sompo_local_storage.json
+
+# Screenshots
+/tmp/*.png
+/screenshots/*.png
+
+# Python (backend reference)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# Plan files
+*.plan.md
+

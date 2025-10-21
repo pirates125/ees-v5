@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  # Next.js Frontend
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_APP_NAME=EE Sigorta
+      - NEXT_PUBLIC_API_URL=http://server:8099
+    depends_on:
+      - server
+    networks:
+      - sigorta-network
+    restart: unless-stopped
+
+  # Rust Backend (Axum)
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8099:8099"
+    volumes:
+      - session-data:/data/sessions
+      - ./server/screenshots:/app/screenshots
+    depends_on:
+      - chromedriver
+      - postgres
+    environment:
+      - HTTP_ADDR=0.0.0.0:8099
+      - RUST_LOG=info
+      - WEBDRIVER_URL=http://chromedriver:9515
+      - HEADLESS=true
+      - TIMEZONE=Europe/Istanbul
+      - ACCEPT_LANGUAGE=tr-TR,tr;q=0.9
+      - SESSION_DIR=/data/sessions
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/sigorta_db
+      - JWT_SECRET=production-secret-change-this
+    env_file:
+      - ./server/.env
+    networks:
+      - sigorta-network
+    restart: unless-stopped
+
+  # ChromeDriver for browser automation
+  chromedriver:
+    image: robcherry/docker-chromedriver:latest
+    ports:
+      - "9515:9515"
+    privileged: true
+    shm_size: 2gb
+    environment:
+      - CHROMEDRIVER_WHITELISTED_IPS=""
+    networks:
+      - sigorta-network
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=kaanoba
+      - POSTGRES_PASSWORD=EEsigorta2024!
+      - POSTGRES_DB=sigorta_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - sigorta-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  session-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  sigorta-network:
+    driver: bridge
