@@ -12,14 +12,17 @@ pub async fn create_quote(
     premium: f64,
     response_data: serde_json::Value,
 ) -> Result<Quote, sqlx::Error> {
+    let id = Uuid::new_v4();
+    
     sqlx::query_as::<_, Quote>(
         r#"
-        INSERT INTO quotes (user_id, request_id, request_data, provider, premium, response_data, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'completed')
+        INSERT INTO quotes (id, user_id, request_id, request_data, provider, premium, response_data, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed')
         RETURNING *
         "#,
     )
-    .bind(user_id)
+    .bind(id.to_string())
+    .bind(user_id.to_string())
     .bind(request_id)
     .bind(request_data)
     .bind(provider)
@@ -31,7 +34,7 @@ pub async fn create_quote(
 
 pub async fn get_quote_by_id(pool: &DbPool, id: Uuid) -> Result<Option<Quote>, sqlx::Error> {
     sqlx::query_as::<_, Quote>("SELECT * FROM quotes WHERE id = $1")
-        .bind(id)
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
@@ -50,7 +53,7 @@ pub async fn list_quotes_by_user(
         LIMIT $2 OFFSET $3
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
@@ -66,7 +69,7 @@ pub async fn count_quotes(pool: &DbPool) -> Result<i64, sqlx::Error> {
 
 pub async fn count_quotes_by_user(pool: &DbPool, user_id: Uuid) -> Result<i64, sqlx::Error> {
     let row = sqlx::query("SELECT COUNT(*) as count FROM quotes WHERE user_id = $1")
-        .bind(user_id)
+        .bind(user_id.to_string())
         .fetch_one(pool)
         .await?;
     Ok(row.get("count"))

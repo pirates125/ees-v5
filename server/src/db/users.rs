@@ -10,13 +10,16 @@ pub async fn create_user(
     name: &str,
     role: &str,
 ) -> Result<User, sqlx::Error> {
+    let id = Uuid::new_v4();
+    
     sqlx::query_as::<_, User>(
         r#"
-        INSERT INTO users (email, password_hash, name, role)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (id, email, password_hash, name, role)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
         "#,
     )
+    .bind(id.to_string())
     .bind(email)
     .bind(password_hash)
     .bind(name)
@@ -27,7 +30,7 @@ pub async fn create_user(
 
 pub async fn get_user_by_id(pool: &DbPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(id)
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
@@ -54,8 +57,8 @@ pub async fn list_users(pool: &DbPool, limit: i64, offset: i64) -> Result<Vec<Us
 }
 
 pub async fn update_last_login(pool: &DbPool, user_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE users SET last_login = NOW() WHERE id = $1")
-        .bind(user_id)
+    sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = $1")
+        .bind(user_id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -91,7 +94,7 @@ pub async fn update_user_profile(
     )
     .bind(updated_name)
     .bind(updated_phone)
-    .bind(user_id)
+    .bind(user_id.to_string())
     .fetch_one(pool)
     .await
 }
@@ -121,7 +124,7 @@ pub async fn change_password(
     // Update password
     sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
         .bind(new_hash)
-        .bind(user_id)
+        .bind(user_id.to_string())
         .execute(pool)
         .await?;
 

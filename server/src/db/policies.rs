@@ -16,30 +16,33 @@ pub async fn create_policy(
     policy_data: serde_json::Value,
     expires_at: Option<DateTime<Utc>>,
 ) -> Result<Policy, sqlx::Error> {
+    let id = Uuid::new_v4();
+    
     sqlx::query_as::<_, Policy>(
         r#"
         INSERT INTO policies 
-        (user_id, quote_id, policy_number, provider, product_type, premium, commission, policy_data, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (id, user_id, quote_id, policy_number, provider, product_type, premium, commission, policy_data, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
         "#,
     )
-    .bind(user_id)
-    .bind(quote_id)
+    .bind(id.to_string())
+    .bind(user_id.to_string())
+    .bind(quote_id.map(|id| id.to_string()))
     .bind(policy_number)
     .bind(provider)
     .bind(product_type)
     .bind(premium)
     .bind(commission)
     .bind(policy_data)
-    .bind(expires_at)
+    .bind(expires_at.map(|dt| dt.to_rfc3339()))
     .fetch_one(pool)
     .await
 }
 
 pub async fn get_policy_by_id(pool: &DbPool, id: Uuid) -> Result<Option<Policy>, sqlx::Error> {
     sqlx::query_as::<_, Policy>("SELECT * FROM policies WHERE id = $1")
-        .bind(id)
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
@@ -58,7 +61,7 @@ pub async fn list_policies_by_user(
         LIMIT $2 OFFSET $3
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
