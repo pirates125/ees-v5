@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  // Development için standalone'i kaldırdık
+  // Production deployment için gerekirse ekleyin: output: "standalone"
   experimental: {
     // Next.js 15 features
   },
