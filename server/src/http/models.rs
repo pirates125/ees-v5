@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -94,9 +93,9 @@ pub struct QuoteResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PremiumDetail {
-    pub net: Decimal,
-    pub gross: Decimal,
-    pub taxes: Decimal,
+    pub net: f64,
+    pub gross: f64,
+    pub taxes: f64,
     pub currency: String,
 }
 
@@ -104,8 +103,8 @@ pub struct PremiumDetail {
 #[serde(rename_all = "camelCase")]
 pub struct Installment {
     pub count: u8,
-    pub per_installment: Decimal,
-    pub total: Decimal,
+    pub per_installment: f64,
+    pub total: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,7 +162,7 @@ pub struct ProvidersResponse {
 pub struct UserQuoteResponse {
     pub id: String,
     pub provider: String,
-    pub premium: Decimal,
+    pub premium: f64,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub request_data: serde_json::Value,

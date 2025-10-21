@@ -1,25 +1,24 @@
 use crate::http::{ApiError, Coverage, Installment, PremiumDetail, QuoteResponse, Timings};
 use crate::providers::quick::selectors::QuickSelectors;
-use crate::utils::parse_tl_price;
 use fantoccini::{Client, Locator};
-use rust_decimal::Decimal;
 
 pub async fn parse_quick_quote(
     client: &Client,
     request_id: String,
     scrape_start_ms: u64,
 ) -> Result<QuoteResponse, ApiError> {
-    let mut price_value: Option<Decimal> = None;
+    let mut price_value: Option<f64> = None;
     
     for selector in QuickSelectors::PRICE_ELEMENTS {
         if let Ok(elements) = client.find_all(Locator::Css(selector)).await {
             for elem in elements {
                 if let Ok(text) = elem.text().await {
                     if text.contains("TL") {
-                        if let Ok(parsed) = parse_tl_price(&text) {
-                            let value = parsed.to_string().parse::<f64>().unwrap_or(0.0);
+                        // Parse TL price (e.g., "1.234,56 TL" -> 1234.56)
+                        let cleaned = text.replace("TL", "").replace(".", "").replace(",", ".").trim().to_string();
+                        if let Ok(value) = cleaned.parse::<f64>() {
                             if value >= 1000.0 && value <= 50000.0 {
-                                price_value = Some(parsed);
+                                price_value = Some(value);
                                 break;
                             }
                         }
@@ -36,7 +35,7 @@ pub async fn parse_quick_quote(
         ApiError::ParseError("Quick fiyat bulunamadı".to_string())
     })?;
     
-    let net = premium / Decimal::from_str_exact("1.18").unwrap();
+    let net = premium / 1.18;
     let taxes = premium - net;
     
     let scrape_elapsed = std::time::SystemTime::now()
@@ -49,9 +48,9 @@ pub async fn parse_quick_quote(
         company: "Quick".to_string(),
         product_type: "trafik".to_string(),
         premium: PremiumDetail {
-            net: net.round_dp(2),
-            gross: premium.round_dp(2),
-            taxes: taxes.round_dp(2),
+            net: (net * 100.0).round() / 100.0,  // Round to 2 decimal places
+            gross: (premium * 100.0).round() / 100.0,
+            taxes: (taxes * 100.0).round() / 100.0,
             currency: "TRY".to_string(),
         },
         installments: vec![

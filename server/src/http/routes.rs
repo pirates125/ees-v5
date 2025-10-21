@@ -15,9 +15,7 @@ use axum::{
     Extension, Json, Router,
 };
 use chrono::Utc;
-use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
 use std::time::SystemTime;
 use uuid::Uuid;
 
@@ -179,7 +177,7 @@ async fn quote_single_handler(
         &quote.request_id,
         serde_json::to_value(&request).unwrap_or_default(),
         &quote.company,
-        Decimal::from_str(&quote.premium.gross.to_string()).unwrap_or_default(),
+        quote.premium.gross,
         serde_json::to_value(&quote).unwrap_or_default(),
     )
     .await;
@@ -209,7 +207,7 @@ async fn compare_quotes_handler(
             &quote.request_id,
             serde_json::to_value(&request).unwrap_or_default(),
             &quote.company,
-            Decimal::from_str(&quote.premium.gross.to_string()).unwrap_or_default(),
+            quote.premium.gross,
             serde_json::to_value(&quote).unwrap_or_default(),
         )
         .await;
@@ -284,7 +282,7 @@ async fn create_policy_handler(
     let policy_number = format!("POL-{}-{}", chrono::Utc::now().timestamp(), uuid::Uuid::new_v4().to_string().split('-').next().unwrap());
     
     // Komisyon hesapla (%10 varsayım)
-    let commission = quote.premium * Decimal::from_str("0.10").unwrap();
+    let commission = quote.premium * 0.10;
     
     let policy = policies::create_policy(
         &state.db_pool,

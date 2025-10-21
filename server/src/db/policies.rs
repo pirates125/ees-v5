@@ -1,7 +1,6 @@
 use crate::db::models::Policy;
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -12,8 +11,8 @@ pub async fn create_policy(
     policy_number: &str,
     provider: &str,
     product_type: &str,
-    premium: Decimal,
-    commission: Option<Decimal>,
+    premium: f64,
+    commission: Option<f64>,
     policy_data: serde_json::Value,
     expires_at: Option<DateTime<Utc>>,
 ) -> Result<Policy, sqlx::Error> {
@@ -73,15 +72,15 @@ pub async fn count_policies(pool: &DbPool) -> Result<i64, sqlx::Error> {
     Ok(row.get("count"))
 }
 
-pub async fn sum_revenue(pool: &DbPool) -> Result<Decimal, sqlx::Error> {
-    let row = sqlx::query("SELECT COALESCE(SUM(premium), 0) as total FROM policies WHERE status = 'active'")
+pub async fn sum_revenue(pool: &DbPool) -> Result<f64, sqlx::Error> {
+    let row = sqlx::query("SELECT COALESCE(SUM(premium), 0.0) as total FROM policies WHERE status = 'active'")
         .fetch_one(pool)
         .await?;
     Ok(row.get("total"))
 }
 
-pub async fn sum_commission(pool: &DbPool) -> Result<Decimal, sqlx::Error> {
-    let row = sqlx::query("SELECT COALESCE(SUM(commission), 0) as total FROM policies WHERE status = 'active'")
+pub async fn sum_commission(pool: &DbPool) -> Result<f64, sqlx::Error> {
+    let row = sqlx::query("SELECT COALESCE(SUM(commission), 0.0) as total FROM policies WHERE status = 'active'")
         .fetch_one(pool)
         .await?;
     Ok(row.get("total"))

@@ -1,8 +1,6 @@
 use crate::http::{ApiError, Coverage, Installment, PremiumDetail, QuoteResponse, Timings};
 use crate::providers::sompo::selectors::SompoSelectors;
-use crate::utils::parse_tl_price;
 use fantoccini::{Client, Locator};
-use rust_decimal::Decimal;
 
 pub async fn parse_quote_from_page(
     client: &Client,
@@ -12,19 +10,19 @@ pub async fn parse_quote_from_page(
     tracing::info!("📊 Fiyat bilgisi parse ediliyor...");
     
     // Fiyat elementlerini ara
-    let mut price_value: Option<Decimal> = None;
+    let mut price_value: Option<f64> = None;
     
     for selector in SompoSelectors::PRICE_ELEMENTS {
         if let Ok(elements) = client.find_all(Locator::Css(selector)).await {
             for elem in elements {
                 if let Ok(text) = elem.text().await {
                     if text.contains("TL") && !text.contains("000.000") {
-                        // Çok yüksek fiyatları filtrele
-                        if let Ok(parsed) = parse_tl_price(&text) {
-                            let value = parsed.to_string().parse::<f64>().unwrap_or(0.0);
+                        // Parse TL price (e.g., "1.234,56 TL" -> 1234.56)
+                        let cleaned = text.replace("TL", "").replace(".", "").replace(",", ".").trim().to_string();
+                        if let Ok(value) = cleaned.parse::<f64>() {
                             if value >= 1000.0 && value <= 50000.0 {
-                                tracing::info!("✅ Fiyat bulundu: {} -> {:?}", text, parsed);
-                                price_value = Some(parsed);
+                                tracing::info!("✅ Fiyat bulundu: {} -> {}", text, value);
+                                price_value = Some(value);
                                 break;
                             } else {
                                 tracing::debug!("⚠️ Aralık dışı fiyat atlandı: {} -> {}", text, value);
@@ -44,13 +42,13 @@ pub async fn parse_quote_from_page(
     })?;
     
     // Vergileri hesapla (örnek: %18 KDV varsayımı)
-    let net = premium / Decimal::from_str_exact("1.18").unwrap();
+    let net = premium / 1.18;
     let taxes = premium - net;
     
     let premium_detail = PremiumDetail {
-        net: net.round_dp(2),
-        gross: premium.round_dp(2),
-        taxes: taxes.round_dp(2),
+        net: (net * 100.0).round() / 100.0,  // Round to 2 decimal places
+        gross: (premium * 100.0).round() / 100.0,
+        taxes: (taxes * 100.0).round() / 100.0,
         currency: "TRY".to_string(),
     };
     
@@ -63,7 +61,7 @@ pub async fn parse_quote_from_page(
         },
         Installment {
             count: 3,
-            per_installment: (premium / Decimal::from(3)).round_dp(2),
+            per_installment: ((premium / 3.0) * 100.0).round() / 100.0,  // Round to 2 decimal places
             total: premium,
         },
     ];

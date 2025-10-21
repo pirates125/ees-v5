@@ -1,10 +1,8 @@
 use regex::Regex;
-use rust_decimal::Decimal;
-use std::str::FromStr;
 
 /// Türkçe TL formatını parse eder
 /// Örnekler: "4.350,00 TL", "4350 TL", "₺4.350", "300.000 TL"
-pub fn parse_tl_price(text: &str) -> Result<Decimal, String> {
+pub fn parse_tl_price(text: &str) -> Result<f64, String> {
     if text.is_empty() {
         return Err("Boş metin".to_string());
     }
@@ -48,7 +46,7 @@ pub fn parse_tl_price(text: &str) -> Result<Decimal, String> {
     if let Some(captures) = re.captures(&normalized) {
         if let Some(matched) = captures.get(1) {
             let number_str = matched.as_str();
-            return Decimal::from_str(number_str)
+            return number_str.parse::<f64>()
                 .map_err(|e| format!("Sayı parse hatası: {}", e));
         }
     }
@@ -59,21 +57,20 @@ pub fn parse_tl_price(text: &str) -> Result<Decimal, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
 
     #[test]
     fn test_parse_turkish_format() {
-        assert_eq!(parse_tl_price("4.350,00 TL").unwrap(), dec!(4350.00));
-        assert_eq!(parse_tl_price("300.000,50 TL").unwrap(), dec!(300000.50));
-        assert_eq!(parse_tl_price("4350 TL").unwrap(), dec!(4350));
-        assert_eq!(parse_tl_price("₺4.350").unwrap(), dec!(4350));
-        assert_eq!(parse_tl_price("1.234,56").unwrap(), dec!(1234.56));
+        assert_eq!(parse_tl_price("4.350,00 TL").unwrap(), 4350.00);
+        assert_eq!(parse_tl_price("300.000,50 TL").unwrap(), 300000.50);
+        assert_eq!(parse_tl_price("4350 TL").unwrap(), 4350.0);
+        assert_eq!(parse_tl_price("₺4.350").unwrap(), 4350.0);
+        assert_eq!(parse_tl_price("1.234,56").unwrap(), 1234.56);
     }
 
     #[test]
     fn test_parse_simple_format() {
-        assert_eq!(parse_tl_price("4350").unwrap(), dec!(4350));
-        assert_eq!(parse_tl_price("4350.50").unwrap(), dec!(4350.50));
+        assert_eq!(parse_tl_price("4350").unwrap(), 4350.0);
+        assert_eq!(parse_tl_price("4350.50").unwrap(), 4350.50);
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use crate::db::models::Quote;
 use crate::db::DbPool;
-use rust_decimal::Decimal;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -10,7 +9,7 @@ pub async fn create_quote(
     request_id: &str,
     request_data: serde_json::Value,
     provider: &str,
-    premium: Decimal,
+    premium: f64,
     response_data: serde_json::Value,
 ) -> Result<Quote, sqlx::Error> {
     sqlx::query_as::<_, Quote>(
