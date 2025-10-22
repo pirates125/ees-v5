@@ -104,31 +104,37 @@ async def main():
             # Form bekle
             await page.wait_for_selector('form', timeout=15000)
             
-            # Username - Playwright fill() otomatik temizler
+            # Username - Human-like typing (type yavaş yavaş)
             username_selector = 'input[type="text"], input[name="username"]'
-            await page.fill(username_selector, username)
+            await page.click(username_selector)  # Focus
+            await page.wait_for_timeout(500)
+            await page.type(username_selector, username, delay=100)  # 100ms per char (human-like)
             
             # Validation
+            await page.wait_for_timeout(300)
             input_value = await page.input_value(username_selector)
             if input_value == username:
                 print(f"[INFO] Username girildi: {username}", file=sys.stderr)
             else:
                 print(f"[WARNING] Username validation failed! Expected: {username}, Got: {input_value}", file=sys.stderr)
             
-            # Password - Playwright fill() otomatik temizler
+            # Password - Human-like typing
             password_selector = 'input[type="password"]'
-            await page.fill(password_selector, password)
+            await page.click(password_selector)  # Focus
+            await page.wait_for_timeout(500)
+            await page.type(password_selector, password, delay=120)  # 120ms per char
             
             # Validation (length check)
+            await page.wait_for_timeout(300)
             input_value = await page.input_value(password_selector)
             if len(input_value) == len(password):
                 print(f"[INFO] Password girildi (len={len(password)})", file=sys.stderr)
             else:
                 print(f"[WARNING] Password validation failed! Expected len: {len(password)}, Got: {len(input_value)}", file=sys.stderr)
             
-            # Login button
-            await page.click('button[type="submit"]')
-            print(f"[INFO] Login button tıklandı", file=sys.stderr)
+            # Login - Enter key (daha natural)
+            await page.press(password_selector, 'Enter')
+            print(f"[INFO] Enter tuşuna basıldı (login)", file=sys.stderr)
             
             # URL değişimini bekle - daha esnek
             await page.wait_for_timeout(3000)  # 3 saniye bekle
@@ -202,12 +208,46 @@ async def main():
             # Dashboard kontrolü - daha esnek
             try:
                 await page.wait_for_url(lambda url: "dashboard" in url and "login" not in url, timeout=15000)
-                print(f"[INFO] Dashboard'a ulaşıldı: {page.url}", file=sys.stderr)
+                dashboard_url = page.url
+                print(f"[INFO] Dashboard'a ulaşıldı: {dashboard_url}", file=sys.stderr)
+                
+                # Bot detection kontrolü
+                if "/bot" in dashboard_url:
+                    print(f"[ERROR] BOT DETECTION - Robot doğrulaması gerekli!", file=sys.stderr)
+                    await page.screenshot(path="debug_bot_detection.png")
+                    
+                    print(f"[INFO] ⏸️  Manuel CAPTCHA çözümü bekleniyor...", file=sys.stderr)
+                    print(f"[INFO] 📍 VDS'de RDP ile browser'ı aç ve CAPTCHA'yı çöz", file=sys.stderr)
+                    print(f"[INFO] ⏳ 60 saniye bekleniyor...", file=sys.stderr)
+                    
+                    # 60 saniye bekle (manuel çözüm için)
+                    await page.wait_for_timeout(60000)
+                    
+                    # URL değişti mi kontrol et
+                    new_url = page.url
+                    if "/bot" not in new_url:
+                        print(f"[INFO] ✅ CAPTCHA çözüldü! Yeni URL: {new_url}", file=sys.stderr)
+                    else:
+                        print(f"[WARNING] Hala bot sayfasında: {new_url}", file=sys.stderr)
+                        print(f"[INFO] ⏳ +30 saniye daha bekleniyor...", file=sys.stderr)
+                        await page.wait_for_timeout(30000)
+                        
+                        final_url = page.url
+                        if "/bot" in final_url:
+                            print(json.dumps({"error": "Bot detection - CAPTCHA çözülmedi"}), file=sys.stderr)
+                            sys.exit(1)
+                
             except:
                 # Timeout ama dashboard'da olabiliriz
                 current_url = page.url
                 if "dashboard" in current_url and "login" not in current_url:
                     print(f"[INFO] Dashboard'a ulaşıldı (timeout ama URL doğru): {current_url}", file=sys.stderr)
+                    
+                    # Bot detection kontrolü
+                    if "/bot" in current_url:
+                        print(f"[ERROR] BOT DETECTION - Manuel müdahale gerekli!", file=sys.stderr)
+                        print(json.dumps({"error": "Bot detection - CAPTCHA gerekli"}), file=sys.stderr)
+                        sys.exit(1)
                 else:
                     await page.screenshot(path="debug_dashboard_timeout.png")
                     print(f"[ERROR] Dashboard'a ulaşılamadı: {current_url}", file=sys.stderr)
