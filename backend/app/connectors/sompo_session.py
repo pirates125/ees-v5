@@ -65,14 +65,26 @@ def main():
         
         print(f"[INFO] Login button tıklandı", file=sys.stderr)
         
-        # Wait for OTP or dashboard
+        # Screenshot al (debug)
+        driver.save_screenshot("debug_after_login.png")
+        print(f"[DEBUG] Screenshot kaydedildi: debug_after_login.png", file=sys.stderr)
+        
+        # Wait for URL change (login sayfasından çık)
         time.sleep(3)
         
+        # URL bekle
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.current_url != "https://ejento.somposigorta.com.tr/dashboard/login"
+            )
+        except:
+            print(f"[WARNING] URL değişmedi - login başarısız olabilir", file=sys.stderr)
+        
         current_url = driver.current_url
-        print(f"[INFO] Current URL: {current_url}", file=sys.stderr)
+        print(f"[INFO] Current URL after login: {current_url}", file=sys.stderr)
         
         # OTP ekranı var mı?
-        if "authenticator" in current_url or "otp" in current_url.lower():
+        if "authenticator" in current_url or "otp" in current_url.lower() or "google-authenticator" in current_url:
             print(f"[INFO] OTP ekranı tespit edildi", file=sys.stderr)
             
             if not secret_key:
@@ -106,8 +118,14 @@ def main():
                 otp_input.clear()
                 otp_input.send_keys(otp)
                 print(f"[INFO] OTP girildi", file=sys.stderr)
+                
+                # Screenshot al (OTP ekranı)
+                driver.save_screenshot("debug_otp_entered.png")
+                print(f"[DEBUG] OTP screenshot: debug_otp_entered.png", file=sys.stderr)
             else:
                 print(f"[ERROR] OTP input bulunamadı!", file=sys.stderr)
+                driver.save_screenshot("debug_otp_not_found.png")
+                print(f"[DEBUG] Error screenshot: debug_otp_not_found.png", file=sys.stderr)
                 sys.exit(1)
             
             # URL değişimini bekle (auto-submit)
@@ -117,12 +135,27 @@ def main():
             
             print(f"[INFO] OTP başarılı!", file=sys.stderr)
         
-        # Dashboard'a ulaştığımızı doğrula
-        WebDriverWait(driver, 10).until(
-            lambda d: "dashboard" in d.current_url
-        )
-        
-        print(f"[INFO] Dashboard'a ulaşıldı: {driver.current_url}", file=sys.stderr)
+        # Dashboard'a ulaştığımızı doğrula (login sayfası DEĞİL!)
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: "dashboard" in d.current_url and "login" not in d.current_url
+            )
+            print(f"[INFO] Dashboard'a ulaşıldı: {driver.current_url}", file=sys.stderr)
+        except:
+            # Başarısız olursa debug bilgisi
+            final_url = driver.current_url
+            driver.save_screenshot("debug_login_failed.png")
+            print(f"[ERROR] Dashboard'a ulaşılamadı! Final URL: {final_url}", file=sys.stderr)
+            print(f"[DEBUG] Error screenshot: debug_login_failed.png", file=sys.stderr)
+            
+            # Bot detection kontrolü
+            if "/bot" in final_url:
+                print(json.dumps({"error": "Bot detection - CAPTCHA gerekli"}), file=sys.stderr)
+            elif "login" in final_url:
+                print(json.dumps({"error": "Login başarısız - credentials yanlış olabilir"}), file=sys.stderr)
+            else:
+                print(json.dumps({"error": f"Beklenmeyen sayfa: {final_url}"}), file=sys.stderr)
+            sys.exit(1)
         
         # Session dump
         cookies = driver.get_cookies()
@@ -136,6 +169,12 @@ def main():
             }
             return storage;
         """)
+        
+        # Validation: Gerçek session'da localStorage veya cookie olmalı
+        if len(cookies) < 3 and len(local_storage) == 0:
+            print(f"[WARNING] Şüpheli session: Çok az cookie ({len(cookies)}) ve localStorage boş!", file=sys.stderr)
+            driver.save_screenshot("debug_suspicious_session.png")
+            print(f"[DEBUG] Suspicious session screenshot: debug_suspicious_session.png", file=sys.stderr)
         
         session_data = {
             "cookies": cookies,
