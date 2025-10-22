@@ -285,64 +285,75 @@ pub async fn login_to_sompo(
     if final_url.as_str().contains("/bot") {
         tracing::warn!("🤖 Bot detection sayfası tespit edildi!");
         
-        // CAPTCHA kontrolü
-        let captcha_check = client.execute(
-            r#"
-            const bodyText = document.body.innerText.toLowerCase();
-            return bodyText.includes('robot') || 
-                   bodyText.includes('captcha') || 
-                   bodyText.includes('doğrula') ||
-                   document.querySelector('iframe[src*="recaptcha"]') !== null ||
-                   document.querySelector('div[class*="captcha"]') !== null;
-            "#,
-            vec![]
-        ).await;
-        
-        if let Ok(has_captcha) = captcha_check {
-            if has_captcha.as_bool().unwrap_or(false) {
-                tracing::warn!("🔐 CAPTCHA tespit edildi!");
-                
-                if config.headless {
-                    tracing::error!("❌ CAPTCHA manuel çözüm gerektirir ama headless=true!");
-                    tracing::info!("💡 Çözüm: .env dosyasında HEADLESS=false yapın, RDP ile bağlanın ve CAPTCHA'yı manuel çözün.");
-                    return Err(ApiError::HumanActionRequired(
-                        "CAPTCHA tespit edildi - Manuel çözüm gerekli! .env'de HEADLESS=false yapın ve RDP ile bağlanın.".to_string()
-                    ));
-                } else {
-                    tracing::info!("⏳ CAPTCHA için manuel çözüm bekleniyor...");
-                    tracing::info!("💡 Lütfen açılan Chrome penceresinde CAPTCHA'yı çözün.");
-                    tracing::info!("   120 saniye bekleniyor...");
-                    
-                    // Manuel çözüm için 120 saniye bekle
-                    for i in 0..24 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
-                        
-                        // Her 5 saniyede bir URL kontrol et
-                        if let Ok(current_url) = client.current_url().await {
-                            if !current_url.as_str().contains("/bot") && current_url.as_str().contains("/dashboard") {
-                                tracing::info!("✅ CAPTCHA çözüldü! Dashboard'a erişildi.");
-                                break;
-                            }
-                        }
-                        
-                        if (i + 1) % 4 == 0 {
-                            tracing::info!("   Bekliyor... ({}/120 saniye)", (i + 1) * 5);
-                        }
-                    }
-                }
+        // Sayfa içeriğini logla (debugging için)
+        if let Ok(body) = client.find(Locator::Css("body")).await {
+            if let Ok(body_text) = body.text().await {
+                tracing::info!("📝 Bot sayfası içeriği: {}", 
+                    body_text.lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .take(15)
+                        .collect::<Vec<_>>()
+                        .join(" | "));
             }
         }
         
-        // CAPTCHA çözüldükten sonra URL'yi tekrar kontrol et
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-        let post_captcha_url = client.current_url().await
-            .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
-        
-        if post_captcha_url.as_str().contains("/bot") {
-            return Err(ApiError::LoginFailed("CAPTCHA çözülemedi - hala bot sayfasında".to_string()));
+        // Headless değilse, manuel müdahale için bekle
+        if !config.headless {
+            tracing::warn!("⏳ Bot detection sayfası - Manuel müdahale için 90 saniye bekleniyor...");
+            tracing::info!("💡 RDP ekranındaki Chrome penceresinde:");
+            tracing::info!("   1. CAPTCHA varsa çözün");
+            tracing::info!("   2. Herhangi bir işlem yapmanız gerekiyorsa yapın");
+            tracing::info!("   3. Dashboard'a geçmeyi bekleyin");
+            
+            // Manuel çözüm için 90 saniye bekle
+            for i in 0..18 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+                
+                // Her 5 saniyede bir URL kontrol et
+                if let Ok(current_url) = client.current_url().await {
+                    if !current_url.as_str().contains("/bot") {
+                        tracing::info!("✅ Bot sayfasından çıkıldı! Yeni URL: {}", current_url);
+                        break;
+                    }
+                }
+                
+                if (i + 1) % 3 == 0 {
+                    tracing::info!("   Bekliyor... ({}/90 saniye)", (i + 1) * 5);
+                }
+            }
+        } else {
+            // Headless ise kısa bekle ve hata ver
+            tracing::error!("❌ Bot detection sayfası - Headless modda çözüm yok!");
+            tracing::info!("💡 Çözüm:");
+            tracing::info!("   1. .env'de HEADLESS=false yapın");
+            tracing::info!("   2. RDP ile VDS'e bağlanın");
+            tracing::info!("   3. Backend'i yeniden başlatın");
+            tracing::info!("   4. CAPTCHA'yı manuel çözün ve session kaydedin");
+            tracing::info!("   5. Sonra HEADLESS=true yapabilirsiniz");
+            
+            tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+            
+            return Err(ApiError::HumanActionRequired(
+                "Bot detection - Manuel çözüm gerekli! .env'de HEADLESS=false yapın ve RDP ile bağlanın.".to_string()
+            ));
         }
         
-        tracing::info!("📍 CAPTCHA sonrası URL: {}", post_captcha_url);
+        // Bot detection sonrası URL'yi tekrar kontrol et
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        let post_bot_url = client.current_url().await
+            .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+        
+        tracing::info!("📍 Bot detection sonrası URL: {}", post_bot_url);
+        
+        if post_bot_url.as_str().contains("/bot") {
+            tracing::error!("❌ Hala bot sayfasında!");
+            return Err(ApiError::LoginFailed("Bot detection aşılamadı - Manuel müdahale gerekiyor!".to_string()));
+        }
+        
+        // Bot detection aşıldı, session'ı kaydet
+        tracing::info!("💾 Bot detection aşıldı! Session kaydediliyor...");
+        save_current_session(client, session_manager).await?;
+        tracing::info!("✅ Session kaydedildi - Bot detection sonrası!");
     }
     
     // Dashboard'a ulaştıysak, session'ı HEMEN kaydet
