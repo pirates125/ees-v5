@@ -31,15 +31,25 @@ pub async fn login_to_sompo(
             } else {
                 tracing::warn!("⚠️ Session geçersiz, yeniden login...");
                 session_manager.clear_session("sompo").ok();
+                
+                // Mevcut URL'yi logla
+                if let Ok(current_url) = client.current_url().await {
+                    tracing::info!("📍 Mevcut URL (session geçersiz): {}", current_url);
+                }
             }
         }
     }
     
-    // Login sayfasına git
+    // Login sayfasına git - explicit login URL kullan
+    let login_url = format!("{}/login", config.sompo_base_url.trim_end_matches('/'));
+    tracing::info!("🔗 Login sayfasına gidiliyor: {}", login_url);
+    
     client
-        .goto(&config.sompo_base_url)
+        .goto(&login_url)
         .await
         .map_err(|e| ApiError::WebDriverError(format!("Sayfa yüklenemedi: {}", e)))?;
+    
+    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     
