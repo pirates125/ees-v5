@@ -481,7 +481,22 @@ async def main():
                 if result.get('success'):
                     print(f"[INFO] {result['card']} kartı '{result['button']}' tıklandı ✅", file=sys.stderr)
                     teklif_al_clicked = True
+                    
+                    # Modal'ın kapanmasını bekle
+                    print(f"[INFO] Modal kapanması bekleniyor...", file=sys.stderr)
                     await page.wait_for_timeout(1000)
+                    
+                    # Modal elementi kaybolsun
+                    try:
+                        await page.wait_for_function("""
+                            () => {
+                                const modals = document.querySelectorAll('.modal, [role="dialog"], [class*="modal"], [class*="dialog"]');
+                                return Array.from(modals).every(m => m.offsetParent === null || window.getComputedStyle(m).display === 'none');
+                            }
+                        """, timeout=5000)
+                        print(f"[INFO] Modal kapandı ✅", file=sys.stderr)
+                    except:
+                        print(f"[WARNING] Modal timeout (devam ediliyor)", file=sys.stderr)
                 else:
                     print(f"[ERROR] {product_type.capitalize()} kartı 'TEKLİF AL' butonu bulunamadı ❌", file=sys.stderr)
             except Exception as e:
@@ -743,19 +758,32 @@ async def main():
             
             await page.wait_for_timeout(500)
             
+            # URL kontrolü - cosmos form sayfasında olduğumuzdan emin ol
+            current_url = page.url
+            print(f"[INFO] Submit button öncesi URL: {current_url}", file=sys.stderr)
+            
+            if "cosmos" not in current_url:
+                print(f"[WARNING] Hala cosmos form sayfasında değiliz! URL: {current_url}", file=sys.stderr)
+                await page.wait_for_timeout(2000)  # Biraz daha bekle
+            
             # "Teklif Oluştur" butonu
             print(f"[INFO] 'Teklif Oluştur' butonu aranıyor...", file=sys.stderr)
             
             js_submit = """
                 (() => {
-                    // Tüm button ve input[type="button"] elementlerini ara
+                    // FORM SAYFASINDA sadece "Teklif Oluştur" ara (TEKLİF AL değil!)
                     const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a[role="button"]'));
                     
                     for (const btn of buttons) {
                         const text = (btn.textContent || btn.value || '').trim();
                         
+                        // Form sayfasında: sadece "Teklif Oluştur" veya "Sorgula"
+                        // "TEKLİF AL" içeren butonları ATLA!
+                        if (text.includes('TEKLİF AL') || text.includes('Teklif Al')) {
+                            continue;  // Modal'daki buton, skip!
+                        }
+                        
                         if (text.includes('Teklif Oluştur') || text.includes('TEKLİF OLUŞTUR') ||
-                            text.includes('Teklif Al') || text.includes('TEKLİF AL') ||
                             text.includes('Sorgula') || text.includes('SORGULA')) {
                             
                             // Görünür mü?
