@@ -667,23 +667,14 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                             return 'button_clicked';
                         }
                         
-                        // Buton yoksa Enter bas
-                        const inputs = document.querySelectorAll('input');
+                        // Buton yoksa Enter bas VE form submit
+                        const inputs = document.querySelectorAll('input[type="text"]');
                         if (inputs.length > 0) {
                             const lastInput = inputs[inputs.length - 1];
                             lastInput.focus();
                             
-                            // Enter event
+                            // 1. Enter event
                             lastInput.dispatchEvent(new KeyboardEvent('keydown', { 
-                                key: 'Enter', 
-                                code: 'Enter', 
-                                keyCode: 13, 
-                                which: 13, 
-                                bubbles: true,
-                                cancelable: true
-                            }));
-                            
-                            lastInput.dispatchEvent(new KeyboardEvent('keypress', { 
                                 key: 'Enter', 
                                 code: 'Enter', 
                                 keyCode: 13, 
@@ -701,7 +692,24 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                                 cancelable: true
                             }));
                             
-                            return 'enter_pressed';
+                            // 2. Form submit
+                            const form = lastInput.closest('form');
+                            if (form) {
+                                try {
+                                    // requestSubmit() modern ve güvenli
+                                    if (form.requestSubmit) {
+                                        form.requestSubmit();
+                                        return 'enter_pressed_and_form_submitted';
+                                    } else {
+                                        form.submit();
+                                        return 'enter_pressed_and_form_submit_called';
+                                    }
+                                } catch (e) {
+                                    return 'enter_pressed_form_submit_failed';
+                                }
+                            }
+                            
+                            return 'enter_pressed_no_form';
                         }
                         
                         return 'no_action';
