@@ -15,7 +15,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Browser automation
-fantoccini = "0.21"
+fantoccini = "0.21"  # Fallback - will be removed after CDP works
+chromiumoxide = "0.7"  # CDP - Playwright-style native control
+futures = "0.3"
 
 # OTP
 totp-lite = "2.0"

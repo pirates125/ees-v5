@@ -1,6 +1,7 @@
 mod login;
 mod parser;
 mod quote;
+mod quote_cdp;  // CDP implementation
 mod selectors;
 
 use crate::config::Config;
@@ -49,8 +50,9 @@ impl InsuranceProvider for SompoProvider {
             ));
         }
         
-        // Quote akışını başlat
-        quote::fetch_sompo_quote(self.config.clone(), request).await
+        // CDP implementasyonunu kullan (Playwright-style)
+        tracing::info!("🚀 Sompo CDP modu kullanılıyor");
+        quote_cdp::fetch_sompo_quote_cdp(self.config.clone(), request).await
     }
 }
 
