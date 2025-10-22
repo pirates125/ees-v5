@@ -438,12 +438,35 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                 const inputs = Array.from(document.querySelectorAll('input'));
                 const code = '{}';
                 let filled = 0;
+                
                 for (let i = 0; i < Math.min(inputs.length, code.length); i++) {{
-                    inputs[i].value = code[i];
-                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inputs[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    const input = inputs[i];
+                    
+                    // Focus
+                    input.focus();
+                    
+                    // Set value
+                    input.value = code[i];
+                    
+                    // Trigger multiple events
+                    input.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                    input.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+                    input.dispatchEvent(new KeyboardEvent('keydown', {{ key: code[i], code: 'Digit' + code[i], bubbles: true }}));
+                    input.dispatchEvent(new KeyboardEvent('keyup', {{ key: code[i], code: 'Digit' + code[i], bubbles: true }}));
+                    
+                    // Auto-focus next input (some UIs do this)
+                    if (i < inputs.length - 1) {{
+                        inputs[i + 1].focus();
+                    }}
+                    
                     filled++;
                 }}
+                
+                // Focus last input
+                if (inputs.length > 0) {{
+                    inputs[inputs.length - 1].focus();
+                }}
+                
                 return filled;
             "#, totp);
             
@@ -451,22 +474,72 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                 Ok(result) => {
                     tracing::info!("✅ {} input JavaScript ile dolduruldu: {:?}", count, result);
                     
-                    // Enter tuşu bas (son input'a)
+                    // Submit butonunu bul ve tıkla
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    let js_press_enter = r#"
+                    
+                    let js_find_and_click_button = r#"
+                        // Önce button'u bul
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        let submitBtn = buttons.find(btn => 
+                            btn.textContent.includes('Doğrula') || 
+                            btn.textContent.includes('Onayla') || 
+                            btn.textContent.includes('Gönder') ||
+                            btn.textContent.includes('Submit') ||
+                            btn.type === 'submit'
+                        );
+                        
+                        if (submitBtn) {
+                            submitBtn.click();
+                            return 'button_clicked';
+                        }
+                        
+                        // Buton yoksa Enter bas
                         const inputs = document.querySelectorAll('input');
                         if (inputs.length > 0) {
                             const lastInput = inputs[inputs.length - 1];
                             lastInput.focus();
-                            const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-                            lastInput.dispatchEvent(event);
-                            return true;
+                            
+                            // Enter event
+                            lastInput.dispatchEvent(new KeyboardEvent('keydown', { 
+                                key: 'Enter', 
+                                code: 'Enter', 
+                                keyCode: 13, 
+                                which: 13, 
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            
+                            lastInput.dispatchEvent(new KeyboardEvent('keypress', { 
+                                key: 'Enter', 
+                                code: 'Enter', 
+                                keyCode: 13, 
+                                which: 13, 
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            
+                            lastInput.dispatchEvent(new KeyboardEvent('keyup', { 
+                                key: 'Enter', 
+                                code: 'Enter', 
+                                keyCode: 13, 
+                                which: 13, 
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            
+                            return 'enter_pressed';
                         }
-                        return false;
+                        
+                        return 'no_action';
                     "#;
                     
-                    if let Ok(_) = client.execute(js_press_enter, vec![]).await {
-                        tracing::info!("⌨️ Enter tuşu JavaScript ile basıldı");
+                    match client.execute(js_find_and_click_button, vec![]).await {
+                        Ok(result) => {
+                            tracing::info!("🔧 OTP submit action: {:?}", result);
+                        }
+                        Err(e) => {
+                            tracing::warn!("⚠️ Submit action başarısız: {}", e);
+                        }
                     }
                     
                     // OTP submit butonu kontrolü geç, doğrulama bekle
