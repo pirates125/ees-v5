@@ -58,6 +58,10 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
+musteridosya/.venv/
+musteridosya/__pycache__/
+musteridosya/**/__pycache__/
 
 # Plan files
 *.plan.md

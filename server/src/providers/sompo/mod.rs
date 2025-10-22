@@ -45,16 +45,16 @@ impl InsuranceProvider for SompoProvider {
         vec!["trafik".to_string(), "kasko".to_string()]
     }
     
-    async fn fetch_quote(&self, request: QuoteRequest) -> Result<QuoteResponse, ApiError> {
-        if !self.is_active() {
-            return Err(ApiError::ProviderInactive(
-                "Sompo credentials yapılandırılmamış".to_string()
-            ));
-        }
+           async fn fetch_quote(&self, request: QuoteRequest) -> Result<QuoteResponse, ApiError> {
+               if !self.is_active() {
+                   return Err(ApiError::ProviderInactive(
+                       "Sompo credentials yapılandırılmamış".to_string()
+                   ));
+               }
 
-        // Python full scraper kullan (%100 garantili)
-        tracing::info!("🐍 Sompo Python full scraper kullanılıyor");
-        python_scraper::fetch_sompo_quote_python(self.config.clone(), request).await
-    }
+               // MÜŞTERİNİN ÇALIŞAN SOMPO SCRAPER'INI KULLAN
+               tracing::info!("🎯 Müşterinin çalışan Sompo scraper'ı kullanılıyor");
+               python_scraper::fetch_sompo_quote_python(self.config.clone(), request).await
+           }
 }
 

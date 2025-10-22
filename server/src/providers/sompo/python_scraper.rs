@@ -11,13 +11,13 @@ pub async fn fetch_sompo_quote_python(
 ) -> Result<QuoteResponse, ApiError> {
     tracing::info!("🐍 Sompo Python full scraper başlatılıyor...");
     
-    let scrape_start = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    
-    // Python Playwright script path (çalışan versiyon!)
-    let script_path = "backend/app/connectors/sompo_playwright.py";
+        let scrape_start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        // MÜŞTERİNİN ÇALIŞAN SOMPO SCRAPER'I
+        let script_path = "backend/app/connectors/sompo_customer_working.py";
     
     // Request data (JSON)
     let product_type_str = match request.coverage.product_type {
