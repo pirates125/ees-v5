@@ -107,6 +107,16 @@ pub async fn login_to_sompo(
     }
     tracing::info!("✅ Login butonu tıklandı");
     
+    // Screenshot al (login butonu tıklandıktan sonra)
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    if let Ok(screenshot) = client.screenshot().await {
+        tracing::info!("📸 Screenshot alındı ({} bytes)", screenshot.len());
+        // Screenshot'u dosyaya kaydet (debugging için)
+        if let Ok(_) = std::fs::write("sompo_after_login_click.png", screenshot) {
+            tracing::info!("💾 Screenshot kaydedildi: sompo_after_login_click.png");
+        }
+    }
+    
     // JavaScript ile de form submit'i tetikle (fallback)
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     let js_submit = r#"
@@ -126,6 +136,14 @@ pub async fn login_to_sompo(
         Err(e) => {
             tracing::warn!("⚠️ JavaScript form submit başarısız: {}", e);
         }
+    }
+    
+    // Console log'ları oku
+    let js_get_console = r#"
+        return (window.__console_logs || []).join('\n');
+    "#;
+    if let Ok(console_logs) = client.execute(js_get_console, vec![]).await {
+        tracing::info!("🖥️ Console logs: {:?}", console_logs);
     }
     
     // Login işleminin tamamlanmasını bekle (daha uzun süre)
