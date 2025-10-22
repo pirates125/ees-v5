@@ -470,37 +470,57 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
         }
     }
     
-    // Tüm input'ları say (6 ayrı input olabilir) - iframe ve shadow DOM dahil
+    // Tüm VISIBLE input'ları say (6 ayrı input olabilir) - iframe ve shadow DOM dahil
     let js_count_inputs = r#"
-        function countAllInputs() {
-            let count = document.querySelectorAll('input').length;
+        function countVisibleInputs() {
+            const allInputs = [];
+            
+            // Normal DOM
+            allInputs.push(...Array.from(document.querySelectorAll('input')));
             
             // iframe içindeki input'lar
             const iframes = document.querySelectorAll('iframe');
             iframes.forEach(iframe => {
                 try {
                     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                    count += iframeDoc.querySelectorAll('input').length;
+                    allInputs.push(...Array.from(iframeDoc.querySelectorAll('input')));
                 } catch (e) {}
             });
             
             // Shadow DOM içindeki input'lar
-            function countInShadow(root) {
-                let shadowCount = 0;
+            function findInShadow(root) {
+                const shadowInputs = [];
+                shadowInputs.push(...Array.from(root.querySelectorAll('input')));
                 const allNodes = root.querySelectorAll('*');
                 allNodes.forEach(node => {
                     if (node.shadowRoot) {
-                        shadowCount += node.shadowRoot.querySelectorAll('input').length;
-                        shadowCount += countInShadow(node.shadowRoot);
+                        shadowInputs.push(...findInShadow(node.shadowRoot));
                     }
                 });
-                return shadowCount;
+                return shadowInputs;
             }
-            count += countInShadow(document);
+            allInputs.push(...findInShadow(document));
             
-            return count;
+            // SADECE visible ve enabled olanları say
+            const visibleInputs = allInputs.filter(input => {
+                if (input.type === 'hidden') return false;
+                if (input.disabled) return false;
+                if (input.readOnly) return false;
+                
+                const style = window.getComputedStyle(input);
+                if (style.display === 'none') return false;
+                if (style.visibility === 'hidden') return false;
+                if (style.opacity === '0') return false;
+                
+                const rect = input.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return false;
+                
+                return true;
+            });
+            
+            return visibleInputs.length;
         }
-        return countAllInputs();
+        return countVisibleInputs();
     "#;
     
     let input_count = match client.execute(js_count_inputs, vec![]).await {
@@ -518,17 +538,17 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
             
             let js_fill_separate = format!(r#"
                 function findAllOtpInputs() {{
-                    const inputs = [];
+                    const allInputs = [];
                     
                     // 1. Normal DOM
-                    inputs.push(...Array.from(document.querySelectorAll('input')));
+                    allInputs.push(...Array.from(document.querySelectorAll('input')));
                     
                     // 2. iframe içinde
                     const iframes = document.querySelectorAll('iframe');
                     iframes.forEach(iframe => {{
                         try {{
                             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                            inputs.push(...Array.from(iframeDoc.querySelectorAll('input')));
+                            allInputs.push(...Array.from(iframeDoc.querySelectorAll('input')));
                         }} catch (e) {{
                             // Cross-origin iframe
                         }}
@@ -548,9 +568,30 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                         
                         return shadowInputs;
                     }}
-                    inputs.push(...findInShadow(document));
+                    allInputs.push(...findInShadow(document));
                     
-                    return inputs;
+                    // SADECE visible ve enabled input'ları filtrele (KRITIK!)
+                    const visibleInputs = allInputs.filter(input => {{
+                        // Gizli veya disabled olanları atla
+                        if (input.type === 'hidden') return false;
+                        if (input.disabled) return false;
+                        if (input.readOnly) return false;
+                        
+                        // Display:none veya visibility:hidden olanları atla
+                        const style = window.getComputedStyle(input);
+                        if (style.display === 'none') return false;
+                        if (style.visibility === 'hidden') return false;
+                        if (style.opacity === '0') return false;
+                        
+                        // Boyutu 0 olanları atla
+                        const rect = input.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) return false;
+                        
+                        return true;
+                    }});
+                    
+                    console.log('📊 Toplam input:', allInputs.length, 'Visible:', visibleInputs.length);
+                    return visibleInputs;
                 }}
                 
                 const inputs = findAllOtpInputs();
