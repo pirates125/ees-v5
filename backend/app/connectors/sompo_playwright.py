@@ -72,39 +72,27 @@ async def main():
             # Form bekle
             await page.wait_for_selector('form', timeout=15000)
             
-            # Username - input validation
-            username_input = await page.query_selector('input[type="text"], input[name="username"]')
-            if username_input:
-                await username_input.clear()
-                await username_input.fill(username)
-                
-                # Validation
-                input_value = await username_input.input_value()
-                if input_value == username:
-                    print(f"[INFO] Username girildi: {username}", file=sys.stderr)
-                else:
-                    print(f"[WARNING] Username validation failed! Expected: {username}, Got: {input_value}", file=sys.stderr)
-            else:
-                print(f"[ERROR] Username input bulunamadı", file=sys.stderr)
-                await page.screenshot(path="debug_no_username.png")
-                sys.exit(1)
+            # Username - Playwright fill() otomatik temizler
+            username_selector = 'input[type="text"], input[name="username"]'
+            await page.fill(username_selector, username)
             
-            # Password - input validation
-            password_input = await page.query_selector('input[type="password"]')
-            if password_input:
-                await password_input.clear()
-                await password_input.fill(password)
-                
-                # Validation (length check)
-                input_value = await password_input.input_value()
-                if len(input_value) == len(password):
-                    print(f"[INFO] Password girildi (len={len(password)})", file=sys.stderr)
-                else:
-                    print(f"[WARNING] Password validation failed! Expected len: {len(password)}, Got: {len(input_value)}", file=sys.stderr)
+            # Validation
+            input_value = await page.input_value(username_selector)
+            if input_value == username:
+                print(f"[INFO] Username girildi: {username}", file=sys.stderr)
             else:
-                print(f"[ERROR] Password input bulunamadı", file=sys.stderr)
-                await page.screenshot(path="debug_no_password.png")
-                sys.exit(1)
+                print(f"[WARNING] Username validation failed! Expected: {username}, Got: {input_value}", file=sys.stderr)
+            
+            # Password - Playwright fill() otomatik temizler
+            password_selector = 'input[type="password"]'
+            await page.fill(password_selector, password)
+            
+            # Validation (length check)
+            input_value = await page.input_value(password_selector)
+            if len(input_value) == len(password):
+                print(f"[INFO] Password girildi (len={len(password)})", file=sys.stderr)
+            else:
+                print(f"[WARNING] Password validation failed! Expected len: {len(password)}, Got: {len(input_value)}", file=sys.stderr)
             
             # Login button
             await page.click('button[type="submit"]')
