@@ -213,29 +213,33 @@ async def main():
                 
                 # Bot detection kontrolü
                 if "/bot" in dashboard_url:
-                    print(f"[ERROR] BOT DETECTION - Robot doğrulaması gerekli!", file=sys.stderr)
+                    print(f"[WARNING] Bot detection sayfası tespit edildi", file=sys.stderr)
                     await page.screenshot(path="debug_bot_detection.png")
                     
-                    print(f"[INFO] ⏸️  Manuel CAPTCHA çözümü bekleniyor...", file=sys.stderr)
-                    print(f"[INFO] 📍 VDS'de RDP ile browser'ı aç ve CAPTCHA'yı çöz", file=sys.stderr)
-                    print(f"[INFO] ⏳ 60 saniye bekleniyor...", file=sys.stderr)
+                    print(f"[INFO] 🔄 Sayfa yenileniyor (1. refresh)...", file=sys.stderr)
+                    await page.reload(wait_until="networkidle", timeout=15000)
+                    await page.wait_for_timeout(2000)
                     
-                    # 60 saniye bekle (manuel çözüm için)
-                    await page.wait_for_timeout(60000)
+                    current_url = page.url
+                    print(f"[DEBUG] URL after 1st refresh: {current_url}", file=sys.stderr)
                     
-                    # URL değişti mi kontrol et
-                    new_url = page.url
-                    if "/bot" not in new_url:
-                        print(f"[INFO] ✅ CAPTCHA çözüldü! Yeni URL: {new_url}", file=sys.stderr)
-                    else:
-                        print(f"[WARNING] Hala bot sayfasında: {new_url}", file=sys.stderr)
-                        print(f"[INFO] ⏳ +30 saniye daha bekleniyor...", file=sys.stderr)
-                        await page.wait_for_timeout(30000)
+                    if "/bot" in current_url:
+                        print(f"[INFO] 🔄 Sayfa yenileniyor (2. refresh)...", file=sys.stderr)
+                        await page.reload(wait_until="networkidle", timeout=15000)
+                        await page.wait_for_timeout(2000)
                         
                         final_url = page.url
+                        print(f"[DEBUG] URL after 2nd refresh: {final_url}", file=sys.stderr)
+                        
                         if "/bot" in final_url:
-                            print(json.dumps({"error": "Bot detection - CAPTCHA çözülmedi"}), file=sys.stderr)
+                            print(f"[ERROR] 2 refresh sonrası hala bot sayfasında: {final_url}", file=sys.stderr)
+                            await page.screenshot(path="debug_bot_still_there.png")
+                            print(json.dumps({"error": "Bot detection - 2 refresh sonrası hala bot sayfası"}), file=sys.stderr)
                             sys.exit(1)
+                        else:
+                            print(f"[INFO] ✅ Bot sayfası bypass edildi! Yeni URL: {final_url}", file=sys.stderr)
+                    else:
+                        print(f"[INFO] ✅ Bot sayfası bypass edildi! Yeni URL: {current_url}", file=sys.stderr)
                 
             except:
                 # Timeout ama dashboard'da olabiliriz
@@ -245,9 +249,27 @@ async def main():
                     
                     # Bot detection kontrolü
                     if "/bot" in current_url:
-                        print(f"[ERROR] BOT DETECTION - Manuel müdahale gerekli!", file=sys.stderr)
-                        print(json.dumps({"error": "Bot detection - CAPTCHA gerekli"}), file=sys.stderr)
-                        sys.exit(1)
+                        print(f"[WARNING] Bot detection sayfası (timeout branch)", file=sys.stderr)
+                        
+                        print(f"[INFO] 🔄 Sayfa yenileniyor (1. refresh)...", file=sys.stderr)
+                        await page.reload(wait_until="networkidle", timeout=15000)
+                        await page.wait_for_timeout(2000)
+                        
+                        new_url = page.url
+                        if "/bot" in new_url:
+                            print(f"[INFO] 🔄 Sayfa yenileniyor (2. refresh)...", file=sys.stderr)
+                            await page.reload(wait_until="networkidle", timeout=15000)
+                            await page.wait_for_timeout(2000)
+                            
+                            final_url = page.url
+                            if "/bot" in final_url:
+                                print(f"[ERROR] 2 refresh sonrası hala bot sayfasında", file=sys.stderr)
+                                print(json.dumps({"error": "Bot detection - 2 refresh sonrası hala bot sayfası"}), file=sys.stderr)
+                                sys.exit(1)
+                            else:
+                                print(f"[INFO] ✅ Bot sayfası bypass edildi!", file=sys.stderr)
+                        else:
+                            print(f"[INFO] ✅ Bot sayfası bypass edildi!", file=sys.stderr)
                 else:
                     await page.screenshot(path="debug_dashboard_timeout.png")
                     print(f"[ERROR] Dashboard'a ulaşılamadı: {current_url}", file=sys.stderr)
@@ -257,8 +279,8 @@ async def main():
             # ==================== QUOTE ====================
             
             # Dashboard screenshot al
-            await page.screenshot(path="debug_dashboard_after_captcha.png", full_page=True)
-            print(f"[DEBUG] Dashboard screenshot: debug_dashboard_after_captcha.png", file=sys.stderr)
+            await page.screenshot(path="debug_dashboard_ready.png", full_page=True)
+            print(f"[DEBUG] Dashboard screenshot: debug_dashboard_ready.png", file=sys.stderr)
             
             # Dashboard'daki tüm linkleri logla
             try:
