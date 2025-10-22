@@ -332,18 +332,58 @@ pub async fn fetch_sompo_quote(
         tracing::info!("📋 Sayfa durumu: {:?}", page_check);
     }
     
-    // Form doldurma - Plaka
+    // Form doldurma - Plaka (JavaScript ile akıllıca bul)
     let plate = &request.vehicle.plate;
     tracing::info!("🚗 Plaka: {}", plate);
     
+    let js_fill_plate = format!(r#"
+        const plateValue = '{}';
+        
+        // Plaka input'unu akıllıca bul
+        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([disabled])'));
+        
+        for (const input of inputs) {{
+            const name = (input.name || '').toLowerCase();
+            const id = (input.id || '').toLowerCase();
+            const placeholder = (input.placeholder || '').toLowerCase();
+            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+            
+            // Plaka ile ilgili input'u bul
+            if (name.includes('plaka') || name.includes('plate') ||
+                id.includes('plaka') || id.includes('plate') ||
+                placeholder.includes('plaka') || placeholder.includes('plate') ||
+                label.includes('plaka')) {{
+                
+                input.focus();
+                input.value = plateValue;
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                
+                return {{ 
+                    found: true, 
+                    name: input.name, 
+                    id: input.id, 
+                    placeholder: input.placeholder 
+                }};
+            }}
+        }}
+        
+        return {{ found: false }};
+    "#, plate);
+    
     let mut plate_filled = false;
-    for selector in SompoSelectors::PLATE_INPUTS {
-        if let Ok(elem) = client.find(Locator::Css(selector)).await {
-            if let Ok(_) = elem.send_keys(plate).await {
-                tracing::info!("✅ Plaka dolduruldu: {}", selector);
-                plate_filled = true;
-                break;
+    match client.execute(&js_fill_plate, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 Plaka JavaScript sonucu: {:?}", result);
+            if let Some(obj) = result.as_object() {
+                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    tracing::info!("✅ Plaka dolduruldu (JavaScript)");
+                    plate_filled = true;
+                }
             }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ Plaka JavaScript hatası: {}", e);
         }
     }
     
@@ -351,14 +391,58 @@ pub async fn fetch_sompo_quote(
         tracing::warn!("⚠️ Plaka input bulunamadı");
     }
     
-    // TCKN doldur
+    // TCKN doldur (JavaScript ile akıllıca bul)
     let tckn = &request.insured.tckn;
-    for selector in SompoSelectors::TCKN_INPUTS {
-        if let Ok(elem) = client.find(Locator::Css(selector)).await {
-            if let Ok(_) = elem.send_keys(tckn).await {
-                tracing::info!("✅ TCKN dolduruldu");
-                break;
+    tracing::info!("🔑 TCKN: {}", tckn);
+    
+    let js_fill_tckn = format!(r#"
+        const tcknValue = '{}';
+        
+        // TCKN input'unu akıllıca bul
+        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([disabled])'));
+        
+        for (const input of inputs) {{
+            const name = (input.name || '').toLowerCase();
+            const id = (input.id || '').toLowerCase();
+            const placeholder = (input.placeholder || '').toLowerCase();
+            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+            
+            // TCKN/TC/Kimlik ile ilgili input'u bul
+            if (name.includes('tckn') || name.includes('tcno') || name.includes('kimlik') ||
+                id.includes('tckn') || id.includes('tcno') || id.includes('kimlik') ||
+                placeholder.includes('tckn') || placeholder.includes('tc') || placeholder.includes('kimlik') ||
+                label.includes('tckn') || label.includes('tc kimlik')) {{
+                
+                input.focus();
+                input.value = tcknValue;
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                
+                return {{ 
+                    found: true, 
+                    name: input.name, 
+                    id: input.id, 
+                    placeholder: input.placeholder 
+                }};
+            }}
+        }}
+        
+        return {{ found: false }};
+    "#, tckn);
+    
+    match client.execute(&js_fill_tckn, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 TCKN JavaScript sonucu: {:?}", result);
+            if let Some(obj) = result.as_object() {
+                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    tracing::info!("✅ TCKN dolduruldu (JavaScript)");
+                } else {
+                    tracing::warn!("⚠️ TCKN input bulunamadı");
+                }
             }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ TCKN JavaScript hatası: {}", e);
         }
     }
     
