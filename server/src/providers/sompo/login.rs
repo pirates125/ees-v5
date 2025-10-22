@@ -473,17 +473,38 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     
     tracing::debug!("🔑 Secret key base32 decode edildi ({} bytes)", secret_bytes.len());
     
-    // TOTP kodu üret (Python pyotp ile aynı: 30s interval, 6 digits, SHA1)
-    let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, 0);
-    tracing::info!("🔢 OTP kodu üretildi: {}", totp);
-    
-    // Time sync uyarısı
-    let now = std::time::SystemTime::now()
+    // Sistem zamanını al
+    let system_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    tracing::debug!("⏰ Sistem zamanı (Unix timestamp): {}", now);
+    
+    tracing::debug!("⏰ Sistem zamanı (Unix timestamp): {}", system_time);
+    
+    // ⚠️ GEÇİCİ FIX: VDS BIOS saati 1 yıl ileri!
+    // TODO: VDS saatini düzelt ve bu offset'i kaldır!
+    let time_offset: i64 = std::env::var("TOTP_TIME_OFFSET_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    
+    if time_offset != 0 {
+        tracing::warn!("⚠️ TOTP time offset aktif: {} saniye", time_offset);
+        tracing::warn!("   VDS saatini düzelt ve .env'den TOTP_TIME_OFFSET_SECONDS'u kaldır!");
+    }
+    
+    let corrected_time = (system_time as i64 + time_offset) as u64;
+    tracing::debug!("   Düzeltilmiş zaman: {}", corrected_time);
     tracing::debug!("   NOT: TOTP time-based'dir. Sunucu saati NTP ile sync olmalı!");
+    
+    // TOTP kodu üret (düzeltilmiş zamanla)
+    let time_offset_u64 = if time_offset < 0 {
+        0u64.wrapping_sub((-time_offset) as u64)
+    } else {
+        time_offset as u64
+    };
+    let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, time_offset_u64);
+    tracing::info!("🔢 OTP kodu üretildi: {}", totp);
     
     // Screenshot al (OTP ekranı)
     if let Ok(screenshot) = client.screenshot().await {
