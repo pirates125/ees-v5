@@ -75,12 +75,14 @@ pub async fn login_to_sompo(
     
     // Password için aynı strateji
     let mut password_filled = false;
+    let mut password_elem_ref = None;
     tracing::info!("🔍 Password input aranıyor (XPath)...");
     if let Ok(elem) = client.find(Locator::XPath(SompoSelectors::PASSWORD_XPATH)).await {
         tracing::info!("✅ Password input bulundu (XPath)");
         if let Ok(_) = elem.send_keys(&config.sompo_password).await {
             tracing::info!("✅ Password dolduruldu (XPath)");
             password_filled = true;
+            password_elem_ref = Some(elem);
         } else {
             tracing::warn!("⚠️ Password gönderilemedi (XPath)");
         }
@@ -98,6 +100,24 @@ pub async fn login_to_sompo(
         tracing::info!("✅ Password dolduruldu (CSS)");
     }
     
+    // Enter tuşuna bas (bazı formlar sadece Enter ile submit olur)
+    if let Some(pwd_elem) = password_elem_ref {
+        tracing::info!("⌨️ Password field'a Enter tuşu basılıyor...");
+        if let Ok(_) = pwd_elem.send_keys("\n").await {
+            tracing::info!("✅ Enter tuşu basıldı");
+            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        }
+    } else {
+        // Eleman referansı yoksa tekrar bul
+        if let Ok(pwd) = client.find(Locator::XPath(SompoSelectors::PASSWORD_XPATH)).await {
+            tracing::info!("⌨️ Password field'a Enter tuşu basılıyor...");
+            if let Ok(_) = pwd.send_keys("\n").await {
+                tracing::info!("✅ Enter tuşu basıldı");
+                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+            }
+        }
+    }
+    
     // Login butonuna tıkla
     tracing::info!("🔍 Login butonu aranıyor...");
     let login_clicked = try_click_button(client, SompoSelectors::LOGIN_BUTTONS).await?;
@@ -107,43 +127,72 @@ pub async fn login_to_sompo(
     }
     tracing::info!("✅ Login butonu tıklandı");
     
-    // Screenshot al (login butonu tıklandıktan sonra)
+    // Buton tıklandıktan hemen sonra JS tetikleniyor mu kontrol et
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    
+    // JavaScript ile butonu manuel tetikle (SPA için)
+    let js_click_button = r#"
+        const btn = document.querySelector('button[type="submit"]');
+        if (btn) {
+            console.log('Button manuel tıklanıyor...');
+            btn.click();
+            return 'clicked';
+        }
+        return 'button not found';
+    "#;
+    
+    match client.execute(js_click_button, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 JavaScript button click: {:?}", result);
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ JavaScript button click başarısız: {}", e);
+        }
+    }
+    
+    // Network request'leri bekle
+    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    
+    // XHR/Fetch request'lerini kontrol et
+    let js_check_requests = r#"
+        const perfEntries = performance.getEntriesByType('resource')
+            .filter(e => e.initiatorType === 'xmlhttprequest' || e.initiatorType === 'fetch')
+            .slice(-5)
+            .map(e => e.name);
+        return JSON.stringify(perfEntries);
+    "#;
+    
+    match client.execute(js_check_requests, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🌐 Recent XHR/Fetch requests: {:?}", result);
+        }
+        Err(e) => {
+            tracing::debug!("XHR check failed: {}", e);
+        }
+    }
+    
+    // JavaScript hataları kontrol et
+    let js_check_errors = r#"
+        if (window.jsErrors && window.jsErrors.length > 0) {
+            return JSON.stringify(window.jsErrors);
+        }
+        return 'no errors tracked';
+    "#;
+    
+    match client.execute(js_check_errors, vec![]).await {
+        Ok(result) => {
+            tracing::info!("⚠️ JavaScript errors: {:?}", result);
+        }
+        Err(_) => {}
+    }
+    
+    // Screenshot al
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     if let Ok(screenshot) = client.screenshot().await {
         tracing::info!("📸 Screenshot alındı ({} bytes)", screenshot.len());
-        // Screenshot'u dosyaya kaydet (debugging için)
         if let Ok(_) = std::fs::write("sompo_after_login_click.png", screenshot) {
             tracing::info!("💾 Screenshot kaydedildi: sompo_after_login_click.png");
         }
-    }
-    
-    // JavaScript ile de form submit'i tetikle (fallback)
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    let js_submit = r#"
-        const form = document.querySelector('form');
-        if (form) {
-            console.log('Form bulundu, submit ediliyor...');
-            form.submit();
-            return true;
-        }
-        return false;
-    "#;
-    
-    match client.execute(js_submit, vec![]).await {
-        Ok(result) => {
-            tracing::info!("🔧 JavaScript form submit: {:?}", result);
-        }
-        Err(e) => {
-            tracing::warn!("⚠️ JavaScript form submit başarısız: {}", e);
-        }
-    }
-    
-    // Console log'ları oku
-    let js_get_console = r#"
-        return (window.__console_logs || []).join('\n');
-    "#;
-    if let Ok(console_logs) = client.execute(js_get_console, vec![]).await {
-        tracing::info!("🖥️ Console logs: {:?}", console_logs);
     }
     
     // Login işleminin tamamlanmasını bekle (daha uzun süre)
