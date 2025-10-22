@@ -107,20 +107,64 @@ pub async fn login_to_sompo(
     }
     tracing::info!("✅ Login butonu tıklandı");
     
-    // Login işleminin tamamlanmasını bekle
-    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+    // JavaScript ile de form submit'i tetikle (fallback)
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    let js_submit = r#"
+        const form = document.querySelector('form');
+        if (form) {
+            console.log('Form bulundu, submit ediliyor...');
+            form.submit();
+            return true;
+        }
+        return false;
+    "#;
+    
+    match client.execute(js_submit, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 JavaScript form submit: {:?}", result);
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ JavaScript form submit başarısız: {}", e);
+        }
+    }
+    
+    // Login işleminin tamamlanmasını bekle (daha uzun süre)
+    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
     
     let current_url = client.current_url().await
         .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
     
     tracing::info!("📍 Login sonrası URL: {}", current_url);
     
-    // Hata mesajı kontrolü
-    if let Ok(error_elem) = client.find(Locator::Css(".error-message, .alert-danger, .text-danger, [role='alert']")).await {
-        if let Ok(error_text) = error_elem.text().await {
-            if !error_text.trim().is_empty() {
-                tracing::error!("❌ Login hatası: {}", error_text);
-                return Err(ApiError::LoginFailed(format!("Login hatası: {}", error_text)));
+    // Hata mesajı kontrolü (geniş selector listesi)
+    let error_selectors = [
+        ".error-message", ".alert-danger", ".text-danger", "[role='alert']",
+        ".error", ".alert", ".warning", ".invalid-feedback",
+        "p.text-red-500", "div.text-red-600", "span.error",
+    ];
+    
+    for selector in error_selectors {
+        if let Ok(error_elem) = client.find(Locator::Css(selector)).await {
+            if let Ok(error_text) = error_elem.text().await {
+                if !error_text.trim().is_empty() {
+                    tracing::error!("❌ Login hatası bulundu ({}): {}", selector, error_text);
+                    return Err(ApiError::LoginFailed(format!("Login hatası: {}", error_text)));
+                }
+            }
+        }
+    }
+    
+    // Sayfadaki tüm visible text'i al (hata mesajı aramak için)
+    if let Ok(body) = client.find(Locator::Css("body")).await {
+        if let Ok(body_text) = body.text().await {
+            let lowercase_text = body_text.to_lowercase();
+            if lowercase_text.contains("hatalı") || 
+               lowercase_text.contains("yanlış") || 
+               lowercase_text.contains("geçersiz") ||
+               lowercase_text.contains("incorrect") ||
+               lowercase_text.contains("invalid") {
+                tracing::error!("❌ Sayfada hata metni tespit edildi: {}", 
+                    body_text.lines().take(5).collect::<Vec<_>>().join(" | "));
             }
         }
     }
@@ -153,7 +197,19 @@ pub async fn login_to_sompo(
     if final_url.as_str().to_lowercase().contains("login") {
         // Sayfa kaynağını logla (debugging için)
         if let Ok(source) = client.source().await {
-            tracing::debug!("📄 Sayfa kaynağı (ilk 500 karakter): {}", &source.chars().take(500).collect::<String>());
+            tracing::debug!("📄 Sayfa kaynağı (ilk 2000 karakter): {}", &source.chars().take(2000).collect::<String>());
+            
+            // Body text'i de al
+            if let Ok(body) = client.find(Locator::Css("body")).await {
+                if let Ok(body_text) = body.text().await {
+                    tracing::info!("📝 Sayfa görünür metni: {}", 
+                        body_text.lines()
+                            .filter(|line| !line.trim().is_empty())
+                            .take(10)
+                            .collect::<Vec<_>>()
+                            .join(" | "));
+                }
+            }
         }
         return Err(ApiError::LoginFailed("Login başarısız - hala login sayfasında".to_string()));
     }
