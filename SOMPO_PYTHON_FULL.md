@@ -11,23 +11,25 @@ Frontend → Rust API → Python Subprocess (Full Scraper) → JSON → Rust API
 
 ## ✅ Neden Full Python?
 
-| Özellik | Python | Rust CDP |
-|---------|--------|----------|
-| Bot Detection | ✅ Bypass | ❌ Tespit ediliyor |
-| OTP Handling | ✅ %100 | ⚠️ %60 |
-| Form Fill | ✅ Dinamik | ⚠️ Statik selector |
-| Price Parse | ✅ Flexible | ⚠️ Kırılgan |
-| **Başarı Oranı** | **%99** | **%30** |
+| Özellik          | Python      | Rust CDP           |
+| ---------------- | ----------- | ------------------ |
+| Bot Detection    | ✅ Bypass   | ❌ Tespit ediliyor |
+| OTP Handling     | ✅ %100     | ⚠️ %60             |
+| Form Fill        | ✅ Dinamik  | ⚠️ Statik selector |
+| Price Parse      | ✅ Flexible | ⚠️ Kırılgan        |
+| **Başarı Oranı** | **%99**     | **%30**            |
 
 ## 📋 Kurulum (VDS - Windows)
 
 ### 1. Python Dependencies
+
 ```powershell
 cd C:\Users\Administrator\ees-v5\backend
 pip install -r requirements.txt
 ```
 
 ### 2. Test Python Script (Standalone)
+
 ```powershell
 $env:SOMPO_USER="BULUT1"
 $env:SOMPO_PASS="EEsigorta.2828"
@@ -39,6 +41,7 @@ python backend/app/connectors/sompo_full.py $request
 ```
 
 **Başarılı Output:**
+
 ```json
 {
   "success": true,
@@ -59,7 +62,9 @@ python backend/app/connectors/sompo_full.py $request
 ```
 
 ### 3. Rust Backend Config
+
 `server/.env` dosyasını güncelle:
+
 ```env
 SOMPO_USER=BULUT1
 SOMPO_PASS=EEsigorta.2828
@@ -67,6 +72,7 @@ SOMPO_SECRET=your_totp_secret_base32
 ```
 
 ### 4. Backend Run
+
 ```powershell
 cd server
 cargo run --release
@@ -110,6 +116,7 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:8099/api/v1/quotes" `
 ## 🔍 Debug & Logs
 
 ### Python Script Logs (stderr)
+
 ```
 [INFO] Sompo scraping başlatıldı: trafik - 34ABC123
 [INFO] Login sayfası yüklendi
@@ -136,6 +143,7 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:8099/api/v1/quotes" `
 ```
 
 ### Rust Backend Logs
+
 ```
 🐍 Sompo Python full scraper kullanılıyor
 🐍 Python: [INFO] Sompo scraping başlatıldı: trafik - 34ABC123
@@ -148,6 +156,7 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:8099/api/v1/quotes" `
 ## 🚨 Troubleshooting
 
 ### Error: Python subprocess başlatılamadı
+
 ```powershell
 # Python PATH kontrol
 where python
@@ -158,38 +167,46 @@ pip list | findstr "pyotp selenium undetected"
 ```
 
 ### Error: OTP input bulunamadı
+
 ```
 [ERROR] OTP input bulunamadı
 ```
+
 **Çözüm:** TOTP secret key Base32 format olmalı, harf büyük, boşluk yok
 
 ### Error: Fiyat bulunamadı
+
 ```
 [ERROR] Fiyat bulunamadı!
 ```
+
 **Çözüm:**
+
 1. `debug_no_price.png` screenshot'ına bak
 2. Sompo UI değişmiş olabilir - selector güncellenmeli
 3. Network timeout - wait time artır
 
 ### Error: Bot detection
+
 ```
 {"error": "Bot detection - CAPTCHA gerekli"}
 ```
+
 **Çözüm:**
+
 1. `undetected-chromedriver` güncel mi? → `pip install --upgrade undetected-chromedriver`
 2. Headless mode? → ChromeOptions'dan kaldır
 3. VDS'de manuel CAPTCHA çöz (RDP ile)
 
 ## 📊 Performance
 
-| Adım | Süre |
-|------|------|
-| Login + OTP | ~5 sn |
-| Form fill | ~2 sn |
-| Quote fetch | ~5 sn |
-| Parse | ~1 sn |
-| **Toplam** | **~13 sn** |
+| Adım        | Süre       |
+| ----------- | ---------- |
+| Login + OTP | ~5 sn      |
+| Form fill   | ~2 sn      |
+| Quote fetch | ~5 sn      |
+| Parse       | ~1 sn      |
+| **Toplam**  | **~13 sn** |
 
 ## 🎯 Başarı Garantisi
 
@@ -204,12 +221,12 @@ pip list | findstr "pyotp selenium undetected"
 
 Rust backend korundu, sadece Sompo Python'a geçti:
 
-| Provider | Implementation | Status |
-|----------|----------------|--------|
-| Sompo | **Python** | ✅ Aktif |
-| Anadolu | Rust CDP | 🔜 Planlı |
-| Quick | Rust CDP | 🔜 Planlı |
-| Axa | Rust CDP | 🔜 Planlı |
+| Provider | Implementation | Status    |
+| -------- | -------------- | --------- |
+| Sompo    | **Python**     | ✅ Aktif  |
+| Anadolu  | Rust CDP       | 🔜 Planlı |
+| Quick    | Rust CDP       | 🔜 Planlı |
+| Axa      | Rust CDP       | 🔜 Planlı |
 
 ## 🌟 Avantajlar
 
