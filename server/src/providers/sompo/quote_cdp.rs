@@ -172,6 +172,45 @@ async fn handle_otp_cdp(
         
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
         
+        // DEBUG: Screenshot + HTML logging
+        if i == 0 {  // Sadece ilk denemede
+            tracing::info!("🔍 OTP sayfası debug bilgileri alınıyor...");
+            
+            // Screenshot al
+            if let Ok(screenshot) = page.screenshot(chromiumoxide::page::ScreenshotParams::builder().build()).await {
+                if let Ok(_) = std::fs::write("otp_debug.png", screenshot) {
+                    tracing::info!("📸 Screenshot kaydedildi: otp_debug.png");
+                }
+            }
+            
+            // Sayfa HTML'ini al
+            if let Ok(content) = page.content().await {
+                tracing::info!("📄 Sayfa HTML uzunluğu: {} karakter", content.len());
+                
+                // Button ve form elementlerini logla
+                let js_debug = r#"
+                    return {
+                        buttons: Array.from(document.querySelectorAll('button, input[type="submit"]')).map(b => ({
+                            tag: b.tagName,
+                            type: b.type,
+                            text: b.textContent?.trim() || b.value || '',
+                            disabled: b.disabled,
+                            visible: b.offsetParent !== null
+                        })),
+                        forms: Array.from(document.querySelectorAll('form')).length,
+                        otpInputs: Array.from(document.querySelectorAll('input[type="text"]')).filter(i => i.offsetParent !== null).length,
+                        url: window.location.href
+                    };
+                "#;
+                
+                if let Ok(debug_result) = page.evaluate(js_debug).await {
+                    if let Ok(debug_value) = debug_result.into_value::<serde_json::Value>() {
+                        tracing::info!("🔧 Debug info: {}", serde_json::to_string_pretty(&debug_value).unwrap_or_default());
+                    }
+                }
+            }
+        }
+        
         // AGRESIF SUBMIT - 5 farklı yöntem!
         tracing::info!("🔍 OTP submit deneniyor (agresif mod)...");
         
