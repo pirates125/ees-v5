@@ -136,77 +136,78 @@ pub async fn fetch_sompo_quote(
     // Ürün sayfasına git (Trafik/Kasko seçimi)
     tracing::info!("🔍 {} ürünü seçiliyor (modal/popup içinde aranıyor)...", product_type);
     
-    // JavaScript ile ürün seçimi - modal içinde "Trafik" başlığını ve "TEKLİF AL" butonunu bul
+    // JavaScript ile ürün seçimi - modal içinde "Trafik" kartını bul
     let js_select_product = format!(r#"
         const productName = '{}';
         
-        // 1. Modal içinde ürün kartını bul (Trafik başlığı + TEKLİF AL butonu)
+        // 1. Modal içindeki TÜM "TEKLİF AL" butonlarını bul ve yakınında "trafik" olup olmadığına bak
         const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content, .p-sidebar');
+        
         for (const modal of modals) {{
-            // Modal içindeki tüm elementleri tara
-            const allElements = Array.from(modal.querySelectorAll('*'));
+            // Modal içindeki tüm butonları al
+            const buttons = Array.from(modal.querySelectorAll('button:not([disabled])'));
             
-            for (const elem of allElements) {{
-                const text = (elem.textContent || elem.innerText || '').trim().toLowerCase();
+            for (const btn of buttons) {{
+                const btnText = (btn.textContent || btn.innerText || '').toLowerCase().trim();
                 
-                // "trafik" başlığını bul (tam eşleşme veya tek başına)
-                if (text === productName || 
-                    (text.includes(productName) && 
-                     !text.includes('kamyon') && 
-                     !text.includes('paket') && 
-                     !text.includes('indirim') && 
-                     !text.includes('teklif al') && // "Trafik TEKLİF AL" gibi birleşik metni atla
-                     text.length <= 20)) {{
+                // "TEKLİF AL" butonu mu?
+                if (btnText.includes('teklif') || btnText.includes('al')) {{
+                    // Bu butonun container'ında (parent/grandparent) "trafik" kelimesi var mı?
+                    let container = btn.parentElement;
+                    let depth = 0;
                     
-                    // Bu element'in parent'ında "TEKLİF AL" butonu var mı?
-                    let parent = elem.parentElement;
-                    let attempts = 0;
-                    while (parent && attempts < 5) {{
-                        const button = parent.querySelector('button:not([disabled])');
-                        if (button) {{
-                            const buttonText = (button.textContent || button.innerText || '').toLowerCase();
-                            if (buttonText.includes('teklif') || buttonText.includes('devam')) {{
-                                button.click();
-                                return {{ found: true, text: text, clickedButton: buttonText, location: 'modal_card' }};
+                    while (container && depth < 7) {{
+                        const containerText = (container.textContent || container.innerText || '').toLowerCase();
+                        
+                        // Container'da "trafik" var mı? (ama yanlış şeyler yok mu?)
+                        if (containerText.includes(productName) && 
+                            !containerText.includes('kamyon') &&
+                            !containerText.includes('paket') &&
+                            !containerText.includes('indirim') &&
+                            containerText.length < 200) {{ // Çok uzun container'ları atla
+                            
+                            // Bu container içinde kaç "teklif al" butonu var?
+                            const buttonsInContainer = container.querySelectorAll('button');
+                            
+                            // Container çok küçükse (sadece bu ürüne ait), tıkla!
+                            if (buttonsInContainer.length <= 3) {{
+                                btn.click();
+                                return {{ 
+                                    found: true, 
+                                    text: containerText.substring(0, 50), 
+                                    buttonText: btnText,
+                                    depth: depth,
+                                    location: 'modal_smart_search'
+                                }};
                             }}
                         }}
-                        parent = parent.parentElement;
-                        attempts++;
-                    }}
-                    
-                    // Buton bulunamadıysa, başlığın kendisine tıkla
-                    if (elem.tagName === 'A' || elem.onclick || elem.style.cursor === 'pointer') {{
-                        elem.click();
-                        return {{ found: true, text: text, location: 'modal_header' }};
+                        
+                        container = container.parentElement;
+                        depth++;
                     }}
                 }}
             }}
         }}
         
-        // 2. Fallback: Modal içinde direkt "TEKLİF AL" yazan butonları ara
+        // 2. Fallback: İlk yaklaşım - "Trafik" başlığı + yakınındaki buton
         for (const modal of modals) {{
-            const buttons = modal.querySelectorAll('button:not([disabled])');
-            for (const btn of buttons) {{
-                const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
-                const prevText = (btn.previousElementSibling?.textContent || '').toLowerCase();
-                const parentText = (btn.parentElement?.textContent || '').toLowerCase();
+            const allText = Array.from(modal.querySelectorAll('*'));
+            
+            for (const elem of allText) {{
+                const text = (elem.textContent || elem.innerText || '').trim().toLowerCase();
                 
-                // Butonu n önünde/üstünde "trafik" varsa tıkla
-                if (btnText.includes('teklif') && 
-                    (prevText.includes(productName) || parentText.includes(productName) && parentText.length < 100)) {{
-                    btn.click();
-                    return {{ found: true, text: parentText, location: 'modal_button' }};
+                // Sadece "trafik" yazıyor mu? (başlık olabilir)
+                if (text === productName) {{
+                    // Yakınındaki ilk butonu bul
+                    const nearbyButton = 
+                        elem.nextElementSibling?.querySelector('button') ||
+                        elem.parentElement?.querySelector('button');
+                    
+                    if (nearbyButton) {{
+                        nearbyButton.click();
+                        return {{ found: true, text: text, location: 'modal_nearby_button' }};
+                    }}
                 }}
-            }}
-        }}
-        
-        // 3. Son çare: Sayfada herhangi bir "Trafik" linki/butonu
-        const allLinks = document.querySelectorAll('a, button, [role="button"]');
-        for (const link of allLinks) {{
-            const text = (link.textContent || link.innerText || '').trim().toLowerCase();
-            if (text === productName && !text.includes('paket')) {{
-                link.click();
-                return {{ found: true, text: text, location: 'page' }};
             }}
         }}
         
