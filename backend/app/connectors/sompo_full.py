@@ -252,31 +252,51 @@ def main():
                     except:
                         pass
                 
-                # JavaScript ile bul ve tıkla (daha esnek matching)
+                # JavaScript ile bul ve tıkla (parent container'da ürün ismi var!)
                 js_click_product = """
                 const keywords = arguments[0];
-                const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
                 
-                for (const btn of buttons) {
-                    const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
+                // "TEKLİF AL" butonlarını bul
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const teklifButtons = buttons.filter(btn => {
+                    const text = (btn.textContent || '').toLowerCase();
+                    return text.includes('teklif') && btn.offsetParent !== null && !btn.disabled;
+                });
+                
+                // Her butonun parent container'ında keyword'ü ara
+                for (const btn of teklifButtons) {
+                    // 5 seviye yukarı parent'lara bak
+                    let container = btn.parentElement;
+                    let depth = 0;
                     
-                    // Daha esnek matching: sadece keyword yeterli (teklif kelimesi olmayabilir)
-                    const hasKeyword = keywords.some(kw => btnText.includes(kw));
-                    
-                    if (hasKeyword && btn.offsetParent !== null && !btn.disabled) {
-                        // Scroll to view
-                        btn.scrollIntoView({block: 'center', behavior: 'smooth'});
+                    while (container && depth < 5) {
+                        const containerText = (container.textContent || container.innerText || '').toLowerCase();
                         
-                        // Wait a bit for scroll
-                        setTimeout(() => {}, 300);
+                        // Container'da keyword var mı?
+                        const hasKeyword = keywords.some(kw => containerText.includes(kw));
                         
-                        // Click
-                        btn.click();
+                        if (hasKeyword) {
+                            // Container'ın çok büyük olmamasını kontrol et (tüm popup içermemeli)
+                            if (containerText.length < 200) {
+                                // Scroll to view
+                                btn.scrollIntoView({block: 'center', behavior: 'smooth'});
+                                
+                                // Wait for scroll
+                                setTimeout(() => {}, 300);
+                                
+                                // Click
+                                btn.click();
+                                
+                                return {
+                                    success: true,
+                                    text: containerText.substring(0, 80),
+                                    buttonText: btn.textContent.trim()
+                                };
+                            }
+                        }
                         
-                        return {
-                            success: true,
-                            text: btnText.substring(0, 50)
-                        };
+                        container = container.parentElement;
+                        depth++;
                     }
                 }
                 
