@@ -216,16 +216,15 @@ async def main():
                     print(f"[WARNING] Bot detection sayfası tespit edildi", file=sys.stderr)
                     await page.screenshot(path="debug_bot_detection.png")
                     
-                    # "Ana Sayfayı Yenile" butonunu ara ve tıkla
-                    print(f"[INFO] 🔄 'Ana Sayfayı Yenile' butonu aranıyor...", file=sys.stderr)
+                    # "ANA SAYFAYI YÜKLE" butonunu ara ve tıkla
+                    print(f"[INFO] 🔄 'ANA SAYFAYI YÜKLE' butonu aranıyor...", file=sys.stderr)
                     
                     js_refresh_button = """
                         (() => {
                             const buttons = Array.from(document.querySelectorAll('button, a'));
                             const refreshBtn = buttons.find(b => 
                                 b.offsetParent !== null && 
-                                ((b.textContent || '').toLowerCase().includes('ana sayfa') ||
-                                 (b.textContent || '').toLowerCase().includes('yenile'))
+                                (b.textContent || '').includes('ANA SAYFAYI YÜKLE')
                             );
                             
                             if (refreshBtn) {
@@ -242,11 +241,11 @@ async def main():
                     try:
                         result = await page.evaluate(js_refresh_button)
                         if result.get('success'):
-                            print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
+                            print(f"[INFO] 'ANA SAYFAYI YÜKLE' tıklandı ✅", file=sys.stderr)
                             refresh_clicked = True
                             await page.wait_for_timeout(3000)
                         else:
-                            print(f"[WARNING] Refresh butonu bulunamadı, page.reload() deneniyor", file=sys.stderr)
+                            print(f"[WARNING] 'ANA SAYFAYI YÜKLE' butonu bulunamadı, page.reload() deneniyor", file=sys.stderr)
                             await page.reload(wait_until="networkidle", timeout=15000)
                             await page.wait_for_timeout(2000)
                     except Exception as e:
@@ -264,7 +263,7 @@ async def main():
                         try:
                             result = await page.evaluate(js_refresh_button)
                             if result.get('success'):
-                                print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı (2. deneme)", file=sys.stderr)
+                                print(f"[INFO] 'ANA SAYFAYI YÜKLE' tıklandı (2. deneme)", file=sys.stderr)
                                 await page.wait_for_timeout(3000)
                             else:
                                 await page.reload(wait_until="networkidle", timeout=15000)
@@ -296,14 +295,13 @@ async def main():
                     if "/bot" in current_url:
                         print(f"[WARNING] Bot detection sayfası (timeout branch)", file=sys.stderr)
                         
-                        # "Ana Sayfayı Yenile" butonunu ara
+                        # "ANA SAYFAYI YÜKLE" butonunu ara
                         js_refresh_button = """
                             (() => {
                                 const buttons = Array.from(document.querySelectorAll('button, a'));
                                 const refreshBtn = buttons.find(b => 
                                     b.offsetParent !== null && 
-                                    ((b.textContent || '').toLowerCase().includes('ana sayfa') ||
-                                     (b.textContent || '').toLowerCase().includes('yenile'))
+                                    (b.textContent || '').includes('ANA SAYFAYI YÜKLE')
                                 );
                                 
                                 if (refreshBtn) {
@@ -319,7 +317,7 @@ async def main():
                         try:
                             result = await page.evaluate(js_refresh_button)
                             if result.get('success'):
-                                print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı", file=sys.stderr)
+                                print(f"[INFO] 'ANA SAYFAYI YÜKLE' tıklandı ✅", file=sys.stderr)
                                 await page.wait_for_timeout(3000)
                             else:
                                 await page.reload(wait_until="networkidle", timeout=15000)
@@ -446,11 +444,14 @@ async def main():
             
             # Playwright native selectors (Trafik/Kasko)
             product_clicked = False
+            
+            # Kesin eşleşme için selector'lar
+            product_name = product_type.capitalize()  # "Trafik" veya "Kasko"
             product_selectors = [
-                f'button:has-text("{product_type.capitalize()}")',
-                f'a:has-text("{product_type.capitalize()}")',
-                f'button:has-text("{product_type.upper()}")',
-                f'a:has-text("{product_type.upper()}")',
+                f'button:has-text("{product_name}")',
+                f'a:has-text("{product_name}")',
+                f'div:has-text("{product_name}") >> button',
+                f'div:has-text("{product_name}") >> a',
             ]
             
             for selector in product_selectors:
