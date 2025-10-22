@@ -333,7 +333,39 @@ async fn try_click_button(client: &Client, selectors: &[&str]) -> Result<bool, A
 }
 
 async fn check_otp_required(client: &Client) -> Result<bool, ApiError> {
-    tracing::info!("🔍 OTP ekranı kontrol ediliyor...");
+    let current_url = client.current_url().await
+        .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+    
+    tracing::info!("🔍 OTP ekranı kontrol ediliyor... URL: {}", current_url);
+    
+    // URL'de authenticator varsa kesinlikle OTP ekranı
+    if current_url.as_str().contains("authenticator") {
+        tracing::info!("✅ Google Authenticator URL tespit edildi!");
+        
+        // Tüm input'ları listele
+        let js_find_inputs = r#"
+            const inputs = Array.from(document.querySelectorAll('input'));
+            return inputs.map(inp => ({
+                type: inp.type,
+                name: inp.name,
+                id: inp.id,
+                placeholder: inp.placeholder,
+                class: inp.className
+            }));
+        "#;
+        
+        match client.execute(js_find_inputs, vec![]).await {
+            Ok(result) => {
+                tracing::info!("📋 Sayfadaki tüm input'lar: {:?}", result);
+            }
+            Err(e) => {
+                tracing::warn!("Input listesi alınamadı: {}", e);
+            }
+        }
+        
+        return Ok(true);
+    }
+    
     for selector in SompoSelectors::OTP_INPUTS {
         tracing::debug!("  → OTP selector deneniyor: {}", selector);
         if client.find(Locator::Css(selector)).await.is_ok() {
@@ -344,10 +376,10 @@ async fn check_otp_required(client: &Client) -> Result<bool, ApiError> {
     
     // XPath ile de dene
     let otp_xpaths = [
-        "//input[@type='text' and contains(@placeholder, 'OTP')]",
-        "//input[@type='text' and contains(@placeholder, 'kod')]",
-        "//input[contains(@name, 'otp')]",
-        "//input[contains(@id, 'otp')]",
+        "//input[@type='text']",  // Genel text input
+        "//input[@type='tel']",    // Tel input
+        "//input[@type='number']", // Number input
+        "//input",                 // Herhangi bir input
     ];
     
     for xpath in otp_xpaths {
@@ -363,8 +395,12 @@ async fn check_otp_required(client: &Client) -> Result<bool, ApiError> {
 
 async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     if secret_key.is_empty() {
+        tracing::error!("❌ SOMPO_SECRET_KEY yapılandırılmamış!");
+        tracing::info!("📱 Google Authenticator Secret Key gerekli!");
+        tracing::info!("   .env dosyasına şunu ekleyin:");
+        tracing::info!("   SOMPO_SECRET_KEY=YOUR_TOTP_SECRET_KEY");
         return Err(ApiError::HumanActionRequired(
-            "SOMPO_SECRET_KEY yapılandırılmamış - Manuel OTP girişi gerekli".to_string()
+            "SOMPO_SECRET_KEY yapılandırılmamış - Manuel OTP girişi gerekli. 30 saniye içinde manuel olarak girin!".to_string()
         ));
     }
     
@@ -372,11 +408,48 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, secret_key.as_bytes(), 0);
     tracing::info!("🔢 OTP kodu üretildi: {}", totp);
     
-    // OTP input'una kodu gir
-    let otp_filled = try_fill_input(client, SompoSelectors::OTP_INPUTS, &totp).await?;
-    if !otp_filled {
-        return Err(ApiError::HumanActionRequired("OTP input bulunamadı".to_string()));
+    // Screenshot al (OTP ekranı)
+    if let Ok(screenshot) = client.screenshot().await {
+        if let Ok(_) = std::fs::write("sompo_otp_screen.png", screenshot) {
+            tracing::info!("💾 OTP ekranı screenshot'u kaydedildi: sompo_otp_screen.png");
+        }
     }
+    
+    // Önce genel input selector'ları dene
+    let generic_selectors = [
+        "input[type='text']",
+        "input[type='tel']",
+        "input[type='number']",
+        "input",
+    ];
+    
+    let mut otp_filled = false;
+    for selector in generic_selectors {
+        if let Ok(elem) = client.find(Locator::Css(selector)).await {
+            tracing::info!("🔍 OTP input bulundu: {}", selector);
+            if let Ok(_) = elem.send_keys(&totp).await {
+                tracing::info!("✅ OTP kodu girildi: {}", selector);
+                otp_filled = true;
+                
+                // Enter tuşu bas
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if let Ok(_) = elem.send_keys("\n").await {
+                    tracing::info!("⌨️ Enter tuşu basıldı");
+                }
+                break;
+            }
+        }
+    }
+    
+    if !otp_filled {
+        // Fallback: Standart selector'lar
+        otp_filled = try_fill_input(client, SompoSelectors::OTP_INPUTS, &totp).await?;
+        if !otp_filled {
+            tracing::error!("❌ OTP input hiçbir selector ile bulunamadı!");
+            return Err(ApiError::HumanActionRequired("OTP input bulunamadı - 30 saniye içinde manuel olarak girin!".to_string()));
+        }
+    }
+    
     tracing::info!("✅ OTP kodu girildi");
     
     // OTP submit butonu
@@ -385,9 +458,12 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     let otp_submitted = try_click_button(client, SompoSelectors::OTP_SUBMIT_BUTTONS).await?;
     if otp_submitted {
         tracing::info!("✅ OTP submit edildi");
+    } else {
+        tracing::warn!("⚠️ OTP submit butonu bulunamadı (Enter tuşu zaten basıldı)");
     }
     
     // OTP doğrulamasının tamamlanmasını bekle
+    tracing::info!("⏳ OTP doğrulaması bekleniyor...");
     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
     
     Ok(())
