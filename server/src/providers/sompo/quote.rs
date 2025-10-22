@@ -219,9 +219,30 @@ pub async fn fetch_sompo_quote(
             tracing::info!("🔧 {} ürün seçimi: {:?}", product_type, result);
             if let Some(obj) = result.as_object() {
                 if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    tracing::info!("✅ {} ürünü seçildi", product_type);
+                    tracing::info!("✅ {} ürünü butonu tıklandı", product_type);
                     product_selected = true;
+                    
+                    // Sayfa/modal değişimini bekle
                     tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+                    
+                    // URL değişti mi kontrol et
+                    if let Ok(new_url) = client.current_url().await {
+                        tracing::info!("📍 Ürün seçimi sonrası URL: {}", new_url);
+                    }
+                    
+                    // Modal kapandı mı kontrol et
+                    let js_check_modal = r#"
+                        const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content');
+                        const visibleModals = Array.from(modals).filter(m => {
+                            const style = window.getComputedStyle(m);
+                            return style.display !== 'none' && style.visibility !== 'hidden';
+                        });
+                        return { modalCount: visibleModals.length };
+                    "#;
+                    
+                    if let Ok(modal_result) = client.execute(js_check_modal, vec![]).await {
+                        tracing::info!("🔧 Modal kontrolü: {:?}", modal_result);
+                    }
                 }
             }
         }
@@ -253,6 +274,29 @@ pub async fn fetch_sompo_quote(
     
     if !product_selected {
         tracing::warn!("⚠️ Ürün seçimi başarısız, mevcut sayfada devam ediliyor");
+    }
+    
+    // Form doldurmadan önce sayfa içeriğini kontrol et
+    let js_check_page = r#"
+        const bodyText = document.body.innerText || '';
+        const inputCount = document.querySelectorAll('input').length;
+        const formCount = document.querySelectorAll('form').length;
+        return {
+            hasPlaka: bodyText.toLowerCase().includes('plaka'),
+            hasTCKN: bodyText.toLowerCase().includes('tckn') || bodyText.toLowerCase().includes('kimlik'),
+            inputCount: inputCount,
+            formCount: formCount,
+            firstInputs: Array.from(document.querySelectorAll('input')).slice(0, 5).map(i => ({
+                type: i.type,
+                name: i.name || '',
+                placeholder: i.placeholder || '',
+                id: i.id || ''
+            }))
+        };
+    "#;
+    
+    if let Ok(page_check) = client.execute(js_check_page, vec![]).await {
+        tracing::info!("📋 Sayfa durumu: {:?}", page_check);
     }
     
     // Form doldurma - Plaka
