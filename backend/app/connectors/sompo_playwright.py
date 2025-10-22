@@ -216,17 +216,62 @@ async def main():
                     print(f"[WARNING] Bot detection sayfası tespit edildi", file=sys.stderr)
                     await page.screenshot(path="debug_bot_detection.png")
                     
-                    print(f"[INFO] 🔄 Sayfa yenileniyor (1. refresh)...", file=sys.stderr)
-                    await page.reload(wait_until="networkidle", timeout=15000)
-                    await page.wait_for_timeout(2000)
+                    # "Ana Sayfayı Yenile" butonunu ara ve tıkla
+                    print(f"[INFO] 🔄 'Ana Sayfayı Yenile' butonu aranıyor...", file=sys.stderr)
                     
-                    current_url = page.url
-                    print(f"[DEBUG] URL after 1st refresh: {current_url}", file=sys.stderr)
+                    js_refresh_button = """
+                        (() => {
+                            const buttons = Array.from(document.querySelectorAll('button, a'));
+                            const refreshBtn = buttons.find(b => 
+                                b.offsetParent !== null && 
+                                ((b.textContent || '').toLowerCase().includes('ana sayfa') ||
+                                 (b.textContent || '').toLowerCase().includes('yenile'))
+                            );
+                            
+                            if (refreshBtn) {
+                                refreshBtn.scrollIntoView({block: 'center'});
+                                refreshBtn.click();
+                                return {success: true, text: (refreshBtn.textContent || '').trim()};
+                            }
+                            
+                            return {success: false};
+                        })()
+                    """
                     
-                    if "/bot" in current_url:
-                        print(f"[INFO] 🔄 Sayfa yenileniyor (2. refresh)...", file=sys.stderr)
+                    refresh_clicked = False
+                    try:
+                        result = await page.evaluate(js_refresh_button)
+                        if result.get('success'):
+                            print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
+                            refresh_clicked = True
+                            await page.wait_for_timeout(3000)
+                        else:
+                            print(f"[WARNING] Refresh butonu bulunamadı, page.reload() deneniyor", file=sys.stderr)
+                            await page.reload(wait_until="networkidle", timeout=15000)
+                            await page.wait_for_timeout(2000)
+                    except Exception as e:
+                        print(f"[WARNING] Refresh hatası: {str(e)[:100]}, page.reload() deneniyor", file=sys.stderr)
                         await page.reload(wait_until="networkidle", timeout=15000)
                         await page.wait_for_timeout(2000)
+                    
+                    current_url = page.url
+                    print(f"[DEBUG] URL after refresh: {current_url}", file=sys.stderr)
+                    
+                    if "/bot" in current_url:
+                        print(f"[WARNING] Hala bot sayfasında, 2. deneme...", file=sys.stderr)
+                        
+                        # 2. deneme
+                        try:
+                            result = await page.evaluate(js_refresh_button)
+                            if result.get('success'):
+                                print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı (2. deneme)", file=sys.stderr)
+                                await page.wait_for_timeout(3000)
+                            else:
+                                await page.reload(wait_until="networkidle", timeout=15000)
+                                await page.wait_for_timeout(2000)
+                        except:
+                            await page.reload(wait_until="networkidle", timeout=15000)
+                            await page.wait_for_timeout(2000)
                         
                         final_url = page.url
                         print(f"[DEBUG] URL after 2nd refresh: {final_url}", file=sys.stderr)
@@ -251,15 +296,51 @@ async def main():
                     if "/bot" in current_url:
                         print(f"[WARNING] Bot detection sayfası (timeout branch)", file=sys.stderr)
                         
-                        print(f"[INFO] 🔄 Sayfa yenileniyor (1. refresh)...", file=sys.stderr)
-                        await page.reload(wait_until="networkidle", timeout=15000)
-                        await page.wait_for_timeout(2000)
+                        # "Ana Sayfayı Yenile" butonunu ara
+                        js_refresh_button = """
+                            (() => {
+                                const buttons = Array.from(document.querySelectorAll('button, a'));
+                                const refreshBtn = buttons.find(b => 
+                                    b.offsetParent !== null && 
+                                    ((b.textContent || '').toLowerCase().includes('ana sayfa') ||
+                                     (b.textContent || '').toLowerCase().includes('yenile'))
+                                );
+                                
+                                if (refreshBtn) {
+                                    refreshBtn.scrollIntoView({block: 'center'});
+                                    refreshBtn.click();
+                                    return {success: true, text: (refreshBtn.textContent || '').trim()};
+                                }
+                                
+                                return {success: false};
+                            })()
+                        """
+                        
+                        try:
+                            result = await page.evaluate(js_refresh_button)
+                            if result.get('success'):
+                                print(f"[INFO] 'Ana Sayfayı Yenile' tıklandı", file=sys.stderr)
+                                await page.wait_for_timeout(3000)
+                            else:
+                                await page.reload(wait_until="networkidle", timeout=15000)
+                                await page.wait_for_timeout(2000)
+                        except:
+                            await page.reload(wait_until="networkidle", timeout=15000)
+                            await page.wait_for_timeout(2000)
                         
                         new_url = page.url
                         if "/bot" in new_url:
-                            print(f"[INFO] 🔄 Sayfa yenileniyor (2. refresh)...", file=sys.stderr)
-                            await page.reload(wait_until="networkidle", timeout=15000)
-                            await page.wait_for_timeout(2000)
+                            print(f"[INFO] 2. deneme...", file=sys.stderr)
+                            try:
+                                result = await page.evaluate(js_refresh_button)
+                                if result.get('success'):
+                                    await page.wait_for_timeout(3000)
+                                else:
+                                    await page.reload(wait_until="networkidle", timeout=15000)
+                                    await page.wait_for_timeout(2000)
+                            except:
+                                await page.reload(wait_until="networkidle", timeout=15000)
+                                await page.wait_for_timeout(2000)
                             
                             final_url = page.url
                             if "/bot" in final_url:
@@ -304,88 +385,152 @@ async def main():
             # "YENİ İŞ TEKLİFİ" butonuna tıkla (modal açılır)
             print(f"[INFO] YENİ İŞ TEKLİFİ butonuna tıklanıyor...", file=sys.stderr)
             
-            js_new_offer = """
-                (() => {
-                    const buttons = Array.from(document.querySelectorAll('button'));
-                    const newOfferBtn = buttons.find(b => 
-                        b.offsetParent !== null && 
-                        (b.textContent || '').toLowerCase().includes('yeni iş teklifi')
-                    );
-                    
-                    if (newOfferBtn) {
-                        newOfferBtn.scrollIntoView({block: 'center'});
-                        newOfferBtn.click();
-                        return {success: true};
-                    }
-                    
-                    return {success: false};
-                })()
-            """
+            # Playwright native selectors dene (has-text)
+            new_offer_clicked = False
+            selectors = [
+                'button:has-text("YENİ İŞ TEKLİFİ")',
+                'button:has-text("Yeni İş Teklifi")',
+                'button:has-text("yeni iş")',
+            ]
             
-            try:
-                result = await page.evaluate(js_new_offer)
-                if result.get('success'):
-                    print(f"[INFO] YENİ İŞ TEKLİFİ tıklandı ✅", file=sys.stderr)
-                    await page.wait_for_timeout(2000)
-                else:
-                    print(f"[WARNING] YENİ İŞ TEKLİFİ butonu bulunamadı", file=sys.stderr)
-            except Exception as e:
-                print(f"[WARNING] YENİ İŞ TEKLİFİ hatası: {str(e)[:100]}", file=sys.stderr)
+            for selector in selectors:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn:
+                        await btn.click()
+                        print(f"[INFO] YENİ İŞ TEKLİFİ tıklandı ✅ (selector: {selector})", file=sys.stderr)
+                        new_offer_clicked = True
+                        await page.wait_for_timeout(2000)
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
+                    continue
+            
+            if not new_offer_clicked:
+                print(f"[WARNING] YENİ İŞ TEKLİFİ butonu bulunamadı, JavaScript ile deneniyor", file=sys.stderr)
+                
+                js_new_offer = """
+                    (() => {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const newOfferBtn = buttons.find(b => 
+                            b.offsetParent !== null && 
+                            (b.textContent || '').toLowerCase().includes('yeni')
+                        );
+                        
+                        if (newOfferBtn) {
+                            newOfferBtn.scrollIntoView({block: 'center'});
+                            newOfferBtn.click();
+                            return {success: true, text: (newOfferBtn.textContent || '').trim()};
+                        }
+                        
+                        return {success: false};
+                    })()
+                """
+                
+                try:
+                    result = await page.evaluate(js_new_offer)
+                    if result.get('success'):
+                        print(f"[INFO] Button tıklandı (JS): {result.get('text', 'unknown')}", file=sys.stderr)
+                        new_offer_clicked = True
+                        await page.wait_for_timeout(2000)
+                    else:
+                        print(f"[ERROR] YENİ İŞ TEKLİFİ butonu bulunamadı ❌", file=sys.stderr)
+                except Exception as e:
+                    print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
             
             # Modal açılınca Trafik/Kasko seç
             print(f"[INFO] Modal'da {product_type.capitalize()} seçiliyor...", file=sys.stderr)
             
-            js_select_product = f"""
-                (() => {{
-                    const productType = '{product_type}';
-                    
-                    // Modal içindeki tüm elementleri ara
-                    const allElements = Array.from(document.querySelectorAll('div, button, a, span'));
-                    
-                    for (const el of allElements) {{
-                        const text = (el.textContent || '').toLowerCase().trim();
+            # Modal'ın açılmasını bekle
+            await page.wait_for_timeout(1000)
+            
+            # Playwright native selectors (Trafik/Kasko)
+            product_clicked = False
+            product_selectors = [
+                f'button:has-text("{product_type.capitalize()}")',
+                f'a:has-text("{product_type.capitalize()}")',
+                f'button:has-text("{product_type.upper()}")',
+                f'a:has-text("{product_type.upper()}")',
+            ]
+            
+            for selector in product_selectors:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn:
+                        await btn.click()
+                        print(f"[INFO] {product_type.capitalize()} seçildi ✅ (selector: {selector})", file=sys.stderr)
+                        product_clicked = True
+                        await page.wait_for_timeout(2000)
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
+                    continue
+            
+            if not product_clicked:
+                print(f"[WARNING] Playwright selector başarısız, JavaScript ile deneniyor", file=sys.stderr)
+                
+                js_select_product = f"""
+                    (() => {{
+                        const productType = '{product_type}';
                         
-                        // "Trafik" veya "Kasko" yazısını içeren element
-                        if (text === productType || text.includes(productType)) {{
-                            // Tıklanabilir mi?
-                            if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.onclick || el.getAttribute('role') === 'button') {{
-                                el.scrollIntoView({{block: 'center'}});
-                                el.click();
-                                return {{success: true, text: text.substring(0, 50)}};
-                            }}
+                        // Modal içindeki tüm elementleri ara
+                        const allElements = Array.from(document.querySelectorAll('div, button, a, span'));
+                        
+                        for (const el of allElements) {{
+                            const text = (el.textContent || '').toLowerCase().trim();
                             
-                            // Parent'ı dene
-                            const parent = el.parentElement;
-                            if (parent && (parent.tagName === 'BUTTON' || parent.tagName === 'A' || parent.onclick)) {{
-                                parent.scrollIntoView({{block: 'center'}});
-                                parent.click();
-                                return {{success: true, text: text.substring(0, 50)}};
+                            // "Trafik" veya "Kasko" yazısını içeren element
+                            if (text === productType || text.includes(productType)) {{
+                                // Tıklanabilir mi?
+                                if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.onclick || el.getAttribute('role') === 'button') {{
+                                    el.scrollIntoView({{block: 'center'}});
+                                    el.click();
+                                    return {{success: true, text: text.substring(0, 50)}};
+                                }}
+                                
+                                // Parent'ı dene
+                                const parent = el.parentElement;
+                                if (parent && (parent.tagName === 'BUTTON' || parent.tagName === 'A' || parent.onclick)) {{
+                                    parent.scrollIntoView({{block: 'center'}});
+                                    parent.click();
+                                    return {{success: true, text: text.substring(0, 50)}};
+                                }}
                             }}
                         }}
-                    }}
-                    
-                    return {{success: false}};
-                }})()
-            """
+                        
+                        return {{success: false}};
+                    }})()
+                """
+                
+                try:
+                    result = await page.evaluate(js_select_product)
+                    if result.get('success'):
+                        print(f"[INFO] {product_type.capitalize()} seçildi (JS): {result.get('text', 'unknown')}", file=sys.stderr)
+                        product_clicked = True
+                        await page.wait_for_timeout(2000)
+                    else:
+                        print(f"[ERROR] Modal'da {product_type} bulunamadı ❌", file=sys.stderr)
+                except Exception as e:
+                    print(f"[ERROR] Ürün seçimi hatası: {str(e)[:100]}", file=sys.stderr)
             
-            link_clicked = False
+            if not product_clicked:
+                await page.screenshot(path="debug_modal_not_found.png", full_page=True)
+                print(f"[ERROR] Ürün seçilemedi, screenshot: debug_modal_not_found.png", file=sys.stderr)
+            
+            # Sayfa yüklensin ve URL değişimini bekle
             try:
-                result = await page.evaluate(js_select_product)
-                if result.get('success'):
-                    print(f"[INFO] {product_type.capitalize()} seçildi: {result.get('text', 'unknown')}", file=sys.stderr)
-                    link_clicked = True
-                    await page.wait_for_timeout(3000)
-                else:
-                    print(f"[WARNING] Modal'da {product_type} bulunamadı", file=sys.stderr)
-            except Exception as e:
-                print(f"[WARNING] Ürün seçimi hatası: {str(e)[:100]}", file=sys.stderr)
+                # URL değişimi bekle (trafik/kasko form sayfası)
+                await page.wait_for_url(lambda url: "trafik" in url.lower() or "kasko" in url.lower() or url != page.url, timeout=10000)
+                print(f"[INFO] Form sayfasına geçildi: {page.url}", file=sys.stderr)
+            except:
+                print(f"[WARNING] URL değişmedi, devam ediliyor: {page.url}", file=sys.stderr)
             
-            # Sayfa yüklensin
             await page.wait_for_load_state("networkidle", timeout=10000)
             
             # Form screenshot
             await page.screenshot(path="debug_before_form.png", full_page=True)
             print(f"[DEBUG] Form sayfası screenshot: debug_before_form.png", file=sys.stderr)
+            print(f"[DEBUG] Current URL: {page.url}", file=sys.stderr)
             
             # Form doldur - Plaka ve TCKN
             print(f"[INFO] Form dolduruluyor: Plaka={plate}, TCKN={tckn}", file=sys.stderr)
