@@ -256,127 +256,303 @@ async def main():
             
             # ==================== QUOTE ====================
             
-            # Trafik/Kasko linki ara (Playwright'ın has-text() kullan)
+            # Dashboard screenshot al
+            await page.screenshot(path="debug_dashboard_after_captcha.png", full_page=True)
+            print(f"[DEBUG] Dashboard screenshot: debug_dashboard_after_captcha.png", file=sys.stderr)
+            
+            # Dashboard'daki tüm linkleri logla
+            try:
+                links_and_buttons = await page.evaluate("""
+                    () => {
+                        const elements = Array.from(document.querySelectorAll('a, button'));
+                        return elements.slice(0, 30).map(el => ({
+                            tag: el.tagName,
+                            text: (el.textContent || '').trim().substring(0, 80),
+                            href: el.href || '',
+                            visible: el.offsetParent !== null
+                        })).filter(e => e.visible && e.text);
+                    }
+                """)
+                print(f"[DEBUG] Dashboard elementleri ({len(links_and_buttons)}):", file=sys.stderr)
+                for i, elem in enumerate(links_and_buttons[:15]):
+                    print(f"  {i+1}. {elem['tag']}: '{elem['text']}'", file=sys.stderr)
+            except:
+                pass
+            
+            # Trafik/Kasko linki ara
             print(f"[INFO] {product_type.capitalize()} linki aranıyor...", file=sys.stderr)
             
-            # Ürün linklerini dene
-            product_keywords = {
-                'trafik': ['Trafik', 'trafik'],
-                'kasko': ['Kasko', 'kasko']
-            }
-            keywords = product_keywords.get(product_type.lower(), ['Trafik'])
-            
+            # Ürün linklerini dene - daha esnek
             link_clicked = False
-            for keyword in keywords:
-                try:
-                    # Playwright'ın has-text() kullan
-                    link = await page.query_selector(f'a:has-text("{keyword}"), button:has-text("{keyword}")')
-                    if link:
-                        await link.click()
-                        print(f"[INFO] {keyword} linki tıklandı", file=sys.stderr)
-                        link_clicked = True
-                        break
-                except:
-                    continue
             
-            if not link_clicked:
-                print(f"[WARNING] Ürün linki bulunamadı, alternatif yöntem deneniyor", file=sys.stderr)
+            # JavaScript ile ara
+            js_find_link = f"""
+                const keywords = ['{product_type}', '{product_type.capitalize()}', 'Trafik', 'TRAFIK'];
+                const elements = Array.from(document.querySelectorAll('a, button, .card, [role="button"]'));
+                
+                for (const el of elements) {{
+                    const text = (el.textContent || el.innerText || '').toLowerCase();
+                    
+                    if (keywords.some(kw => text.includes(kw.toLowerCase())) && 
+                        !text.includes('yenileme') && 
+                        !text.includes('bilgilendirme') &&
+                        el.offsetParent !== null) {{
+                        
+                        el.scrollIntoView({{block: 'center'}});
+                        el.click();
+                        
+                        return {{
+                            success: true,
+                            text: text.substring(0, 80),
+                            tag: el.tagName
+                        }};
+                    }}
+                }}
+                
+                return {{success: false}};
+            """
+            
+            try:
+                result = await page.evaluate(js_find_link)
+                if result.get('success'):
+                    print(f"[INFO] Ürün linki tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
+                    link_clicked = True
+                    await page.wait_for_timeout(3000)
+                else:
+                    print(f"[WARNING] JavaScript ile ürün linki bulunamadı", file=sys.stderr)
+            except Exception as e:
+                print(f"[WARNING] Link arama hatası: {str(e)[:100]}", file=sys.stderr)
             
             # Sayfa yüklensin
             await page.wait_for_load_state("networkidle", timeout=10000)
             
-            # Form doldur - Plaka
+            # Form screenshot
+            await page.screenshot(path="debug_before_form.png", full_page=True)
+            print(f"[DEBUG] Form sayfası screenshot: debug_before_form.png", file=sys.stderr)
+            
+            # Form doldur - Plaka ve TCKN
             print(f"[INFO] Form dolduruluyor: Plaka={plate}, TCKN={tckn}", file=sys.stderr)
             
-            # Plaka input selectors
-            plate_selectors = [
-                'input[name*="plak"]',
-                'input[placeholder*="lak"]',
-                'input[placeholder*="late"]'
-            ]
+            # Tüm input'ları logla
+            try:
+                inputs = await page.evaluate("""
+                    () => {
+                        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
+                        return inputs.filter(i => i.offsetParent !== null).map(inp => ({
+                            name: inp.name || '',
+                            placeholder: inp.placeholder || '',
+                            type: inp.type || '',
+                            id: inp.id || ''
+                        }));
+                    }
+                """)
+                print(f"[DEBUG] Görünen input'lar ({len(inputs)}):", file=sys.stderr)
+                for i, inp in enumerate(inputs[:10]):
+                    print(f"  {i+1}. type={inp['type']}, name={inp['name']}, placeholder={inp['placeholder']}", file=sys.stderr)
+            except:
+                pass
             
-            for selector in plate_selectors:
-                try:
-                    if await page.query_selector(selector):
-                        await page.fill(selector, plate)
-                        print(f"[INFO] Plaka dolduruldu: {selector}", file=sys.stderr)
-                        break
-                except:
-                    continue
+            # JavaScript ile form doldur
+            js_fill_form = f"""
+                const plate = '{plate}';
+                const tckn = '{tckn}';
+                
+                const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
+                const visibleInputs = inputs.filter(i => i.offsetParent !== null && !i.disabled);
+                
+                let plataDone = false;
+                let tcknDone = false;
+                
+                for (const inp of visibleInputs) {{
+                    const placeholder = (inp.placeholder || '').toLowerCase();
+                    const name = (inp.name || '').toLowerCase();
+                    const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
+                    
+                    // Plaka
+                    if (!plataDone && (placeholder.includes('plak') || name.includes('plak') || label.includes('plak'))) {{
+                        inp.focus();
+                        inp.value = plate;
+                        inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        plataDone = true;
+                        continue;
+                    }}
+                    
+                    // TCKN
+                    if (!tcknDone && (placeholder.includes('tc') || name.includes('tc') || label.includes('tc') || 
+                                      placeholder.includes('kimlik') || name.includes('kimlik'))) {{
+                        inp.focus();
+                        inp.value = tckn;
+                        inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        tcknDone = true;
+                        continue;
+                    }}
+                }}
+                
+                return {{plaka: plataDone, tckn: tcknDone}};
+            """
             
-            # TCKN input selectors
-            tckn_selectors = [
-                'input[name*="tc"]',
-                'input[name*="kimlik"]',
-                'input[placeholder*="TC"]',
-                'input[placeholder*="Kimlik"]'
-            ]
+            try:
+                form_result = await page.evaluate(js_fill_form)
+                if form_result.get('plaka'):
+                    print(f"[INFO] Plaka dolduruldu ✅", file=sys.stderr)
+                else:
+                    print(f"[WARNING] Plaka input bulunamadı ❌", file=sys.stderr)
+                
+                if form_result.get('tckn'):
+                    print(f"[INFO] TCKN dolduruldu ✅", file=sys.stderr)
+                else:
+                    print(f"[WARNING] TCKN input bulunamadı ❌", file=sys.stderr)
+            except Exception as e:
+                print(f"[ERROR] Form doldurma hatası: {str(e)[:100]}", file=sys.stderr)
             
-            for selector in tckn_selectors:
-                try:
-                    if await page.query_selector(selector):
-                        await page.fill(selector, tckn)
-                        print(f"[INFO] TCKN dolduruldu: {selector}", file=sys.stderr)
-                        break
-                except:
-                    continue
+            await page.wait_for_timeout(2000)
             
             # Submit button
             print(f"[INFO] Submit butonu aranıyor...", file=sys.stderr)
             
-            submit_selectors = [
-                'button:has-text("Teklif Al")',
-                'button:has-text("Sorgula")',
-                'button:has-text("Hesapla")',
-                'button[type="submit"]'
-            ]
+            # Tüm button'ları logla
+            try:
+                buttons = await page.evaluate("""
+                    () => {
+                        const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
+                        return buttons.filter(b => b.offsetParent !== null).map(btn => ({
+                            text: (btn.textContent || '').trim().substring(0, 50),
+                            type: btn.type || '',
+                            class: btn.className || ''
+                        }));
+                    }
+                """)
+                print(f"[DEBUG] Görünen button'lar ({len(buttons)}):", file=sys.stderr)
+                for i, btn in enumerate(buttons[:10]):
+                    print(f"  {i+1}. type={btn['type']}, text='{btn['text']}'", file=sys.stderr)
+            except:
+                pass
             
-            for selector in submit_selectors:
-                try:
-                    if await page.query_selector(selector):
-                        await page.click(selector)
-                        print(f"[INFO] Submit button tıklandı: {selector}", file=sys.stderr)
-                        break
-                except:
-                    continue
+            # JavaScript ile submit button bul ve tıkla
+            js_submit = """
+                const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'ara'];
+                const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
+                const visibleButtons = buttons.filter(b => b.offsetParent !== null);
+                
+                for (const btn of visibleButtons) {
+                    const text = (btn.textContent || btn.innerText || '').toLowerCase();
+                    
+                    if (keywords.some(kw => text.includes(kw))) {
+                        btn.scrollIntoView({block: 'center'});
+                        btn.click();
+                        
+                        return {
+                            success: true,
+                            text: text.substring(0, 50)
+                        };
+                    }
+                }
+                
+                return {success: false};
+            """
+            
+            submit_clicked = False
+            try:
+                submit_result = await page.evaluate(js_submit)
+                if submit_result.get('success'):
+                    print(f"[INFO] Submit butonu tıklandı: {submit_result.get('text', 'unknown')}", file=sys.stderr)
+                    submit_clicked = True
+                else:
+                    print(f"[WARNING] Submit butonu bulunamadı ❌", file=sys.stderr)
+            except Exception as e:
+                print(f"[ERROR] Submit hatası: {str(e)[:100]}", file=sys.stderr)
             
             # Sonuçları bekle
             print(f"[INFO] Sonuçlar bekleniyor...", file=sys.stderr)
-            await page.wait_for_timeout(10000)  # 10 saniye
+            await page.wait_for_timeout(5000)
+            await page.wait_for_load_state("networkidle", timeout=20000)
             
             # ==================== PARSE ====================
             
-            # Fiyat bul - Playwright selectors
+            # Sonuç sayfası screenshot
+            await page.screenshot(path="debug_results.png", full_page=True)
+            print(f"[DEBUG] Sonuç sayfası screenshot: debug_results.png", file=sys.stderr)
+            
+            # Tüm fiyat-like elementleri logla
+            print(f"[INFO] Fiyat aranıyor...", file=sys.stderr)
+            try:
+                price_candidates = await page.evaluate("""
+                    () => {
+                        const elements = Array.from(document.querySelectorAll('div, span, p, td'));
+                        const tlRegex = /(\\d{1,3}(\\.\\d{3})*(,\\d{2})?\\s*(TL|₺))/;
+                        
+                        return elements
+                            .filter(el => el.offsetParent !== null && tlRegex.test(el.textContent))
+                            .slice(0, 15)
+                            .map(el => ({
+                                text: (el.textContent || '').trim().substring(0, 100),
+                                class: el.className || '',
+                                tag: el.tagName
+                            }));
+                    }
+                """)
+                print(f"[DEBUG] Fiyat adayları ({len(price_candidates)}):", file=sys.stderr)
+                for i, pc in enumerate(price_candidates):
+                    print(f"  {i+1}. {pc['tag']}.{pc['class']}: '{pc['text']}'", file=sys.stderr)
+            except:
+                pass
+            
+            # JavaScript ile fiyat bul - en yüksek değer
+            js_find_price = """
+                const tlRegex = /(\\d{1,3}(\\.\\d{3})*(,\\d{2})?\\s*(TL|₺))/g;
+                const elements = Array.from(document.querySelectorAll('div, span, p, td, [class*="prem"], [class*="prim"], [class*="price"], [class*="fiyat"]'));
+                
+                let maxPrice = 0;
+                let maxPriceText = '';
+                
+                for (const el of elements) {
+                    if (el.offsetParent !== null) {
+                        const text = el.textContent || '';
+                        const matches = text.match(tlRegex);
+                        
+                        if (matches && matches.length > 0) {
+                            for (const match of matches) {
+                                // TL fiyatı parse et
+                                const cleanedMatch = match.replace(/TL|₺/g, '').replace(/\\./g, '').replace(',', '.').trim();
+                                const price = parseFloat(cleanedMatch);
+                                
+                                if (price > 100 && price < 100000 && price > maxPrice) {
+                                    maxPrice = price;
+                                    maxPriceText = match;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return {
+                    success: maxPrice > 0,
+                    price: maxPriceText,
+                    value: maxPrice
+                };
+            """
+            
             price = 0.0
             price_text = ""
             
-            price_selectors = [
-                '.premium',
-                '.prim',
-                '.amount',
-                'text="TL"',  # Playwright text selector
-                '*:has-text("TL")'
-            ]
-            
-            for selector in price_selectors:
-                try:
-                    elements = await page.query_selector_all(selector)
-                    for el in elements:
-                        text = await el.text_content()
-                        if text and 'TL' in text and len(text) < 50:
-                            parsed = parse_tl_price(text)
-                            if 100 < parsed < 100000:
-                                if parsed > price:
-                                    price = parsed
-                                    price_text = text
-                except:
-                    continue
-            
-            if price == 0.0:
-                # Screenshot al
-                await page.screenshot(path="debug_no_price_playwright.png")
-                print(f"[ERROR] Fiyat bulunamadı", file=sys.stderr)
-                print(json.dumps({"error": "Fiyat elementi bulunamadı"}), file=sys.stderr)
+            try:
+                price_result = await page.evaluate(js_find_price)
+                
+                if price_result.get('success'):
+                    price_text = price_result.get('price')
+                    price = price_result.get('value')
+                    print(f"[INFO] Fiyat bulundu: {price_text} (={price} TL) ✅", file=sys.stderr)
+                else:
+                    print(f"[ERROR] Fiyat bulunamadı ❌", file=sys.stderr)
+                    await page.screenshot(path="debug_no_price.png", full_page=True)
+                    print(json.dumps({"error": "Fiyat elementi bulunamadı"}), file=sys.stderr)
+                    sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] Fiyat parse hatası: {str(e)[:100]}", file=sys.stderr)
+                await page.screenshot(path="debug_price_error.png", full_page=True)
+                print(json.dumps({"error": f"Fiyat parse hatası: {str(e)[:100]}"}), file=sys.stderr)
                 sys.exit(1)
             
             print(f"[INFO] Fiyat bulundu: {price_text} -> {price} TL", file=sys.stderr)
