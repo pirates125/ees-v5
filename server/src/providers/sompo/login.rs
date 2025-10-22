@@ -110,24 +110,51 @@ pub async fn login_to_sompo(
     // Login işleminin tamamlanmasını bekle
     tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
     
+    let current_url = client.current_url().await
+        .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+    
+    tracing::info!("📍 Login sonrası URL: {}", current_url);
+    
+    // Hata mesajı kontrolü
+    if let Ok(error_elem) = client.find(Locator::Css(".error-message, .alert-danger, .text-danger, [role='alert']")).await {
+        if let Ok(error_text) = error_elem.text().await {
+            if !error_text.trim().is_empty() {
+                tracing::error!("❌ Login hatası: {}", error_text);
+                return Err(ApiError::LoginFailed(format!("Login hatası: {}", error_text)));
+            }
+        }
+    }
+    
     // OTP kontrolü
     if let Ok(otp_found) = check_otp_required(client).await {
         if otp_found {
             tracing::info!("🔐 OTP ekranı tespit edildi");
             handle_otp(client, &config.sompo_secret_key).await?;
+            
+            // OTP sonrası URL kontrol et
+            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+            let post_otp_url = client.current_url().await
+                .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+            tracing::info!("📍 OTP sonrası URL: {}", post_otp_url);
+        } else {
+            tracing::info!("ℹ️ OTP ekranı bulunamadı");
         }
     }
     
-    // Login başarısını doğrula
+    // Son URL kontrolü
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     
-    let current_url = client.current_url().await
+    let final_url = client.current_url().await
         .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
     
-    tracing::info!("📍 Mevcut URL: {}", current_url);
+    tracing::info!("📍 Final URL: {}", final_url);
     
     // Hala login sayfasındaysak hata
-    if current_url.as_str().to_lowercase().contains("login") {
+    if final_url.as_str().to_lowercase().contains("login") {
+        // Sayfa kaynağını logla (debugging için)
+        if let Ok(source) = client.source().await {
+            tracing::debug!("📄 Sayfa kaynağı (ilk 500 karakter): {}", &source.chars().take(500).collect::<String>());
+        }
         return Err(ApiError::LoginFailed("Login başarısız - hala login sayfasında".to_string()));
     }
     
@@ -183,11 +210,31 @@ async fn try_click_button(client: &Client, selectors: &[&str]) -> Result<bool, A
 }
 
 async fn check_otp_required(client: &Client) -> Result<bool, ApiError> {
+    tracing::info!("🔍 OTP ekranı kontrol ediliyor...");
     for selector in SompoSelectors::OTP_INPUTS {
+        tracing::debug!("  → OTP selector deneniyor: {}", selector);
         if client.find(Locator::Css(selector)).await.is_ok() {
+            tracing::info!("  ✅ OTP input bulundu: {}", selector);
             return Ok(true);
         }
     }
+    
+    // XPath ile de dene
+    let otp_xpaths = [
+        "//input[@type='text' and contains(@placeholder, 'OTP')]",
+        "//input[@type='text' and contains(@placeholder, 'kod')]",
+        "//input[contains(@name, 'otp')]",
+        "//input[contains(@id, 'otp')]",
+    ];
+    
+    for xpath in otp_xpaths {
+        tracing::debug!("  → OTP XPath deneniyor: {}", xpath);
+        if client.find(Locator::XPath(xpath)).await.is_ok() {
+            tracing::info!("  ✅ OTP input bulundu (XPath): {}", xpath);
+            return Ok(true);
+        }
+    }
+    
     Ok(false)
 }
 
