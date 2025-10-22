@@ -357,207 +357,173 @@ async def main():
             
             # ==================== QUOTE ====================
             
-            # Dashboard screenshot al
-            await page.screenshot(path="debug_dashboard_ready.png", full_page=True)
-            print(f"[DEBUG] Dashboard screenshot: debug_dashboard_ready.png", file=sys.stderr)
+            # Popup'ları kapat
+            print(f"[INFO] Popup'lar kapatılıyor...", file=sys.stderr)
             
-            # Dashboard'daki tüm linkleri logla
-            try:
-                links_and_buttons = await page.evaluate("""
-                    () => {
-                        const elements = Array.from(document.querySelectorAll('a, button'));
-                        return elements.slice(0, 30).map(el => ({
-                            tag: el.tagName,
-                            text: (el.textContent || '').trim().substring(0, 80),
-                            href: el.href || '',
-                            visible: el.offsetParent !== null
-                        })).filter(e => e.visible && e.text);
+            js_close_popups = """
+                (() => {
+                    let closed = 0;
+                    
+                    // "Tamam", "İleri", "Kapat", "X" butonlarını bul
+                    const closeButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+                    
+                    for (const btn of closeButtons) {
+                        const text = (btn.textContent || '').toLowerCase().trim();
+                        const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                        
+                        if (text === 'tamam' || text === 'hayır' || text === 'kapat' || 
+                            text === 'x' || text === '×' || ariaLabel.includes('close')) {
+                            
+                            if (btn.offsetParent !== null) {
+                                btn.click();
+                                closed++;
+                            }
+                        }
                     }
-                """)
-                print(f"[DEBUG] Dashboard elementleri ({len(links_and_buttons)}):", file=sys.stderr)
-                for i, elem in enumerate(links_and_buttons[:15]):
-                    print(f"  {i+1}. {elem['tag']}: '{elem['text']}'", file=sys.stderr)
-            except:
-                pass
+                    
+                    return {closed: closed};
+                })()
+            """
+            
+            try:
+                result = await page.evaluate(js_close_popups)
+                if result.get('closed', 0) > 0:
+                    print(f"[INFO] {result['closed']} popup kapatıldı ✅", file=sys.stderr)
+                    await page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"[WARNING] Popup kapatma hatası: {str(e)[:50]}", file=sys.stderr)
             
             # "YENİ İŞ TEKLİFİ" butonuna tıkla (modal açılır)
             print(f"[INFO] YENİ İŞ TEKLİFİ butonuna tıklanıyor...", file=sys.stderr)
             
-            # Playwright native selectors dene (has-text)
-            new_offer_clicked = False
-            selectors = [
-                'button:has-text("YENİ İŞ TEKLİFİ")',
-                'button:has-text("Yeni İş Teklifi")',
-                'button:has-text("yeni iş")',
-            ]
+            js_new_offer = """
+                (() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const newOfferBtn = buttons.find(b => 
+                        b.offsetParent !== null && 
+                        (b.textContent || '').includes('YENİ İŞ TEKLİFİ')
+                    );
+                    
+                    if (newOfferBtn) {
+                        newOfferBtn.click();
+                        return {success: true};
+                    }
+                    
+                    return {success: false};
+                })()
+            """
             
-            for selector in selectors:
-                try:
-                    btn = await page.query_selector(selector)
-                    if btn:
-                        await btn.click()
-                        print(f"[INFO] YENİ İŞ TEKLİFİ tıklandı ✅ (selector: {selector})", file=sys.stderr)
-                        new_offer_clicked = True
-                        await page.wait_for_timeout(2000)
-                        break
-                except Exception as e:
-                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
-                    continue
+            try:
+                result = await page.evaluate(js_new_offer)
+                if result.get('success'):
+                    print(f"[INFO] YENİ İŞ TEKLİFİ tıklandı ✅", file=sys.stderr)
+                    await page.wait_for_timeout(800)
+                else:
+                    print(f"[ERROR] YENİ İŞ TEKLİFİ butonu bulunamadı ❌", file=sys.stderr)
+            except Exception as e:
+                print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
             
-            if not new_offer_clicked:
-                print(f"[WARNING] YENİ İŞ TEKLİFİ butonu bulunamadı, JavaScript ile deneniyor", file=sys.stderr)
-                
-                js_new_offer = """
-                    (() => {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const newOfferBtn = buttons.find(b => 
-                            b.offsetParent !== null && 
-                            (b.textContent || '').toLowerCase().includes('yeni')
-                        );
+            # Modal'da Trafik kartı altındaki "TEKLİF AL" butonunu bul
+            print(f"[INFO] Modal'da {product_type.capitalize()} kartı 'TEKLİF AL' butonu aranıyor...", file=sys.stderr)
+            await page.wait_for_timeout(500)
+            
+            # Trafik kartını bul ve altındaki TEKLİF AL'a bas
+            js_find_product_card = f"""
+                (() => {{
+                    const productName = '{product_type.capitalize()}';
+                    
+                    // Tüm div'leri ara
+                    const allDivs = Array.from(document.querySelectorAll('div'));
+                    
+                    for (const div of allDivs) {{
+                        const text = (div.textContent || '').trim();
                         
-                        if (newOfferBtn) {
-                            newOfferBtn.scrollIntoView({block: 'center'});
-                            newOfferBtn.click();
-                            return {success: true, text: (newOfferBtn.textContent || '').trim()};
-                        }
-                        
-                        return {success: false};
-                    })()
-                """
-                
-                try:
-                    result = await page.evaluate(js_new_offer)
-                    if result.get('success'):
-                        print(f"[INFO] Button tıklandı (JS): {result.get('text', 'unknown')}", file=sys.stderr)
-                        new_offer_clicked = True
-                        await page.wait_for_timeout(2000)
-                    else:
-                        print(f"[ERROR] YENİ İŞ TEKLİFİ butonu bulunamadı ❌", file=sys.stderr)
-                except Exception as e:
-                    print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
-            
-            # Modal açılınca Trafik/Kasko seç
-            print(f"[INFO] Modal'da {product_type.capitalize()} seçiliyor...", file=sys.stderr)
-            
-            # Modal'ın açılmasını bekle
-            await page.wait_for_timeout(1000)
-            
-            # Playwright native selectors (Trafik/Kasko)
-            product_clicked = False
-            
-            # Kesin eşleşme için selector'lar
-            product_name = product_type.capitalize()  # "Trafik" veya "Kasko"
-            product_selectors = [
-                f'button:has-text("{product_name}")',
-                f'a:has-text("{product_name}")',
-                f'div:has-text("{product_name}") >> button',
-                f'div:has-text("{product_name}") >> a',
-            ]
-            
-            for selector in product_selectors:
-                try:
-                    btn = await page.query_selector(selector)
-                    if btn:
-                        await btn.click()
-                        print(f"[INFO] {product_type.capitalize()} seçildi ✅ (selector: {selector})", file=sys.stderr)
-                        product_clicked = True
-                        await page.wait_for_timeout(2000)
-                        break
-                except Exception as e:
-                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
-                    continue
-            
-            if not product_clicked:
-                print(f"[WARNING] Playwright selector başarısız, JavaScript ile deneniyor", file=sys.stderr)
-                
-                js_select_product = f"""
-                    (() => {{
-                        const productType = '{product_type}';
-                        
-                        // Modal içindeki tüm elementleri ara
-                        const allElements = Array.from(document.querySelectorAll('div, button, a, span'));
-                        
-                        for (const el of allElements) {{
-                            const text = (el.textContent || '').toLowerCase().trim();
+                        // "Trafik" veya "Kasko" yazısını içeren div (kart)
+                        if (text.includes(productName) && div.offsetParent !== null) {{
+                            // Bu div içindeki veya altındaki "TEKLİF AL" butonunu ara
+                            const buttons = Array.from(div.querySelectorAll('button, a'));
+                            const teklifBtn = buttons.find(b => 
+                                (b.textContent || '').includes('TEKLİF AL') && 
+                                b.offsetParent !== null
+                            );
                             
-                            // "Trafik" veya "Kasko" yazısını içeren element
-                            if (text === productType || text.includes(productType)) {{
-                                // Tıklanabilir mi?
-                                if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.onclick || el.getAttribute('role') === 'button') {{
-                                    el.scrollIntoView({{block: 'center'}});
-                                    el.click();
-                                    return {{success: true, text: text.substring(0, 50)}};
-                                }}
+                            if (teklifBtn) {{
+                                teklifBtn.scrollIntoView({{block: 'center'}});
+                                teklifBtn.click();
+                                return {{success: true, card: productName, button: 'TEKLİF AL'}};
+                            }}
+                            
+                            // Parent div'deki button'ları da dene
+                            const parentDiv = div.parentElement;
+                            if (parentDiv) {{
+                                const parentButtons = Array.from(parentDiv.querySelectorAll('button, a'));
+                                const parentTeklifBtn = parentButtons.find(b => 
+                                    (b.textContent || '').includes('TEKLİF AL') && 
+                                    b.offsetParent !== null
+                                );
                                 
-                                // Parent'ı dene
-                                const parent = el.parentElement;
-                                if (parent && (parent.tagName === 'BUTTON' || parent.tagName === 'A' || parent.onclick)) {{
-                                    parent.scrollIntoView({{block: 'center'}});
-                                    parent.click();
-                                    return {{success: true, text: text.substring(0, 50)}};
+                                if (parentTeklifBtn) {{
+                                    parentTeklifBtn.scrollIntoView({{block: 'center'}});
+                                    parentTeklifBtn.click();
+                                    return {{success: true, card: productName, button: 'TEKLİF AL (parent)'}};
                                 }}
                             }}
                         }}
-                        
-                        return {{success: false}};
-                    }})()
-                """
-                
-                try:
-                    result = await page.evaluate(js_select_product)
-                    if result.get('success'):
-                        print(f"[INFO] {product_type.capitalize()} seçildi (JS): {result.get('text', 'unknown')}", file=sys.stderr)
-                        product_clicked = True
-                        await page.wait_for_timeout(2000)
-                    else:
-                        print(f"[ERROR] Modal'da {product_type} bulunamadı ❌", file=sys.stderr)
-                except Exception as e:
-                    print(f"[ERROR] Ürün seçimi hatası: {str(e)[:100]}", file=sys.stderr)
-            
-            if not product_clicked:
-                await page.screenshot(path="debug_modal_not_found.png", full_page=True)
-                print(f"[ERROR] Ürün seçilemedi, screenshot: debug_modal_not_found.png", file=sys.stderr)
-            
-            # "Teklif Al" butonunu bekle ve tıkla
-            print(f"[INFO] Modal'da 'Teklif Al' butonu aranıyor...", file=sys.stderr)
-            await page.wait_for_timeout(1000)
+                    }}
+                    
+                    return {{success: false}};
+                }})()
+            """
             
             teklif_al_clicked = False
-            teklif_al_selectors = [
-                'button:has-text("Teklif Al")',
-                'button:has-text("TEKLİF AL")',
-                'a:has-text("Teklif Al")',
-                'button:has-text("teklif")',
-            ]
+            try:
+                result = await page.evaluate(js_find_product_card)
+                if result.get('success'):
+                    print(f"[INFO] {result['card']} kartı '{result['button']}' tıklandı ✅", file=sys.stderr)
+                    teklif_al_clicked = True
+                    await page.wait_for_timeout(1000)
+                else:
+                    print(f"[ERROR] {product_type.capitalize()} kartı 'TEKLİF AL' butonu bulunamadı ❌", file=sys.stderr)
+            except Exception as e:
+                print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
             
-            for selector in teklif_al_selectors:
-                try:
-                    btn = await page.query_selector(selector)
-                    if btn:
-                        await btn.click()
-                        print(f"[INFO] 'Teklif Al' tıklandı ✅ (selector: {selector})", file=sys.stderr)
-                        teklif_al_clicked = True
-                        await page.wait_for_timeout(2000)
-                        break
-                except Exception as e:
-                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
-                    continue
+            # Form sayfasına geçişi bekle (cosmos.sompojaoan.com.tr)
+            print(f"[INFO] Form sayfasına geçiş bekleniyor (cosmos domain)...", file=sys.stderr)
             
-            if not teklif_al_clicked:
-                print(f"[WARNING] 'Teklif Al' butonu bulunamadı, JavaScript ile deneniyor", file=sys.stderr)
+            try:
+                # URL değişimi bekle - cosmos domain'e geçmeli
+                await page.wait_for_url(lambda url: "cosmos" in url or "ejento.somposigorta.com.tr" not in url, timeout=10000)
+                print(f"[INFO] Form sayfasına geçildi: {page.url}", file=sys.stderr)
+            except:
+                print(f"[WARNING] URL timeout, current: {page.url}", file=sys.stderr)
+            
+            await page.wait_for_load_state("networkidle", timeout=10000)
+            await page.wait_for_timeout(1000)
+            
+            # Form screenshot
+            await page.screenshot(path="debug_form_page.png", full_page=True)
+            print(f"[DEBUG] Form sayfası screenshot: debug_form_page.png", file=sys.stderr)
+            print(f"[DEBUG] Form URL: {page.url}", file=sys.stderr)
+            
+            # Trafik/Kasko checkbox'ını seç
+            if product_type.lower() == "trafik":
+                print(f"[INFO] Trafik checkbox'ı seçiliyor...", file=sys.stderr)
                 
-                js_teklif_al = """
+                js_select_trafik = """
                     (() => {
-                        const buttons = Array.from(document.querySelectorAll('button, a'));
-                        const teklifBtn = buttons.find(b => 
-                            b.offsetParent !== null && 
-                            (b.textContent || '').toLowerCase().includes('teklif')
-                        );
+                        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
                         
-                        if (teklifBtn) {
-                            teklifBtn.scrollIntoView({block: 'center'});
-                            teklifBtn.click();
-                            return {success: true, text: (teklifBtn.textContent || '').trim()};
+                        for (const cb of checkboxes) {
+                            const label = cb.labels && cb.labels[0] ? cb.labels[0].textContent.toLowerCase() : '';
+                            const name = (cb.name || '').toLowerCase();
+                            const id = (cb.id || '').toLowerCase();
+                            
+                            if (label.includes('trafik') || name.includes('trafik') || id.includes('trafik')) {
+                                if (!cb.checked) {
+                                    cb.click();
+                                    return {success: true, checkbox: 'Trafik'};
+                                }
+                            }
                         }
                         
                         return {success: false};
@@ -565,155 +531,77 @@ async def main():
                 """
                 
                 try:
-                    result = await page.evaluate(js_teklif_al)
+                    result = await page.evaluate(js_select_trafik)
                     if result.get('success'):
-                        print(f"[INFO] 'Teklif Al' tıklandı (JS): {result.get('text', 'unknown')}", file=sys.stderr)
-                        teklif_al_clicked = True
-                        await page.wait_for_timeout(2000)
-                    else:
-                        print(f"[ERROR] 'Teklif Al' butonu bulunamadı ❌", file=sys.stderr)
+                        print(f"[INFO] {result['checkbox']} checkbox seçildi ✅", file=sys.stderr)
                 except Exception as e:
-                    print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
+                    print(f"[WARNING] Checkbox seçimi hatası: {str(e)[:50]}", file=sys.stderr)
             
-            # Sayfa yüklensin ve URL değişimini bekle
-            print(f"[INFO] Form sayfasına geçiş bekleniyor...", file=sys.stderr)
-            current_url_before = page.url
+            # Araç Plakası doldur
+            print(f"[INFO] Araç Plakası dolduruluyor: {plate}", file=sys.stderr)
             
-            try:
-                # URL değişimi bekle (trafik/kasko form sayfası)
-                await page.wait_for_url(lambda url: "dashboard" not in url or url != current_url_before, timeout=10000)
-                print(f"[INFO] Form sayfasına geçildi: {page.url}", file=sys.stderr)
-            except:
-                print(f"[WARNING] URL timeout, devam ediliyor: {page.url}", file=sys.stderr)
-            
-            await page.wait_for_load_state("networkidle", timeout=10000)
-            await page.wait_for_timeout(2000)  # Ekstra bekleme - form yüklensin
-            
-            # Form screenshot
-            await page.screenshot(path="debug_before_form.png", full_page=True)
-            print(f"[DEBUG] Form sayfası screenshot: debug_before_form.png", file=sys.stderr)
-            print(f"[DEBUG] Current URL: {page.url}", file=sys.stderr)
-            
-            # Form doldur - Plaka ve TCKN
-            print(f"[INFO] Form dolduruluyor: Plaka={plate}, TCKN={tckn}", file=sys.stderr)
-            
-            # Tüm input'ları logla
-            try:
-                inputs = await page.evaluate("""
-                    () => {
-                        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
-                        return inputs.filter(i => i.offsetParent !== null).map(inp => ({
-                            name: inp.name || '',
-                            placeholder: inp.placeholder || '',
-                            type: inp.type || '',
-                            id: inp.id || ''
-                        }));
-                    }
-                """)
-                print(f"[DEBUG] Görünen input'lar ({len(inputs)}):", file=sys.stderr)
-                for i, inp in enumerate(inputs[:10]):
-                    print(f"  {i+1}. type={inp['type']}, name={inp['name']}, placeholder={inp['placeholder']}", file=sys.stderr)
-            except:
-                pass
-            
-            # JavaScript ile form doldur
-            js_fill_form = f"""
+            js_fill_plate = f"""
                 (() => {{
                     const plate = '{plate}';
-                    const tckn = '{tckn}';
+                    const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"])'));
                     
-                    const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
-                    const visibleInputs = inputs.filter(i => i.offsetParent !== null && !i.disabled);
-                    
-                    let plataDone = false;
-                    let tcknDone = false;
-                    
-                    for (const inp of visibleInputs) {{
+                    for (const inp of inputs) {{
                         const placeholder = (inp.placeholder || '').toLowerCase();
                         const name = (inp.name || '').toLowerCase();
                         const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
+                        const prevLabel = inp.previousElementSibling ? inp.previousElementSibling.textContent.toLowerCase() : '';
                         
-                        // Plaka
-                        if (!plataDone && (placeholder.includes('plak') || name.includes('plak') || label.includes('plak'))) {{
+                        if (placeholder.includes('plak') || name.includes('plak') || 
+                            label.includes('plak') || label.includes('araç') || 
+                            prevLabel.includes('plak') || prevLabel.includes('araç')) {{
+                            
                             inp.focus();
                             inp.value = plate;
                             inp.dispatchEvent(new Event('input', {{bubbles: true}}));
                             inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            plataDone = true;
-                            continue;
-                        }}
-                        
-                        // TCKN
-                        if (!tcknDone && (placeholder.includes('tc') || name.includes('tc') || label.includes('tc') || 
-                                          placeholder.includes('kimlik') || name.includes('kimlik') || placeholder.includes('vkn'))) {{
-                            inp.focus();
-                            inp.value = tckn;
-                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            tcknDone = true;
-                            continue;
+                            inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                            
+                            return {{success: true, field: 'Araç Plakası'}};
                         }}
                     }}
                     
-                    return {{plaka: plataDone, tckn: tcknDone}};
+                    return {{success: false}};
                 }})()
             """
             
             try:
-                form_result = await page.evaluate(js_fill_form)
-                if form_result.get('plaka'):
-                    print(f"[INFO] Plaka dolduruldu ✅", file=sys.stderr)
+                result = await page.evaluate(js_fill_plate)
+                if result.get('success'):
+                    print(f"[INFO] {result['field']} dolduruldu ✅", file=sys.stderr)
                 else:
                     print(f"[WARNING] Plaka input bulunamadı ❌", file=sys.stderr)
-                
-                if form_result.get('tckn'):
-                    print(f"[INFO] TCKN dolduruldu ✅", file=sys.stderr)
-                else:
-                    print(f"[WARNING] TCKN input bulunamadı ❌", file=sys.stderr)
             except Exception as e:
-                print(f"[ERROR] Form doldurma hatası: {str(e)[:100]}", file=sys.stderr)
+                print(f"[ERROR] Plaka doldurma hatası: {str(e)[:100]}", file=sys.stderr)
             
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(500)
             
-            # Submit button
-            print(f"[INFO] Submit butonu aranıyor...", file=sys.stderr)
+            # "Teklif Oluştur" butonu
+            print(f"[INFO] 'Teklif Oluştur' butonu aranıyor...", file=sys.stderr)
             
-            # Tüm button'ları logla
-            try:
-                buttons = await page.evaluate("""
-                    () => {
-                        const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
-                        return buttons.filter(b => b.offsetParent !== null).map(btn => ({
-                            text: (btn.textContent || '').trim().substring(0, 50),
-                            type: btn.type || '',
-                            class: btn.className || ''
-                        }));
-                    }
-                """)
-                print(f"[DEBUG] Görünen button'lar ({len(buttons)}):", file=sys.stderr)
-                for i, btn in enumerate(buttons[:10]):
-                    print(f"  {i+1}. type={btn['type']}, text='{btn['text']}'", file=sys.stderr)
-            except:
-                pass
-            
-            # JavaScript ile submit button bul ve tıkla
             js_submit = """
                 (() => {
-                    const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'ara'];
                     const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
-                    const visibleButtons = buttons.filter(b => b.offsetParent !== null);
                     
-                    for (const btn of visibleButtons) {
-                        const text = (btn.textContent || btn.innerText || '').toLowerCase();
+                    for (const btn of buttons) {
+                        const text = (btn.textContent || '').trim();
                         
-                        if (keywords.some(kw => text.includes(kw))) {
-                            btn.scrollIntoView({block: 'center'});
-                            btn.click();
+                        if (text.includes('Teklif Oluştur') || text.includes('TEKLİF OLUŞTUR') ||
+                            text.includes('Teklif Al') || text.includes('Sorgula')) {
                             
-                            return {
-                                success: true,
-                                text: text.substring(0, 50)
-                            };
+                            if (btn.offsetParent !== null) {
+                                btn.scrollIntoView({block: 'center'});
+                                btn.click();
+                                
+                                return {
+                                    success: true,
+                                    text: text.substring(0, 50)
+                                };
+                            }
                         }
                     }
                     
@@ -721,21 +609,19 @@ async def main():
                 })()
             """
             
-            submit_clicked = False
             try:
                 submit_result = await page.evaluate(js_submit)
                 if submit_result.get('success'):
-                    print(f"[INFO] Submit butonu tıklandı: {submit_result.get('text', 'unknown')}", file=sys.stderr)
-                    submit_clicked = True
+                    print(f"[INFO] Submit butonu tıklandı: {submit_result.get('text', 'Teklif Oluştur')}", file=sys.stderr)
                 else:
-                    print(f"[WARNING] Submit butonu bulunamadı ❌", file=sys.stderr)
+                    print(f"[WARNING] 'Teklif Oluştur' butonu bulunamadı ❌", file=sys.stderr)
             except Exception as e:
                 print(f"[ERROR] Submit hatası: {str(e)[:100]}", file=sys.stderr)
             
             # Sonuçları bekle
             print(f"[INFO] Sonuçlar bekleniyor...", file=sys.stderr)
-            await page.wait_for_timeout(5000)
-            await page.wait_for_load_state("networkidle", timeout=20000)
+            await page.wait_for_timeout(3000)  # 5s -> 3s (hızlandırma)
+            await page.wait_for_load_state("networkidle", timeout=15000)  # 20s -> 15s (hızlandırma)
             
             # ==================== PARSE ====================
             
