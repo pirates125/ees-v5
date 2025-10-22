@@ -85,52 +85,93 @@ pub async fn fetch_sompo_quote(
         tracing::info!("📍 YENİ İŞ TEKLİFİ sonrası URL: {}", current_url);
     }
     
-    // Sayfadaki tüm görünür metinleri logla (debugging)
-    let js_get_page_text = r#"
-        const allText = document.body.innerText || '';
-        const lines = allText.split('\n').filter(l => l.trim().length > 0).slice(0, 30);
-        return lines.join(' | ');
+    // QR Kod Sıfırlama popup'ı varsa kapat
+    let js_close_qr_popup = r#"
+        const buttons = Array.from(document.querySelectorAll('button'));
+        for (const btn of buttons) {
+            const text = (btn.innerText || '').toLowerCase();
+            if (text.includes('hayır') || text.includes('kapat') || text.includes('iptal')) {
+                btn.click();
+                return { closed: true, text: btn.innerText };
+            }
+        }
+        return { closed: false };
     "#;
     
-    if let Ok(page_text) = client.execute(js_get_page_text, vec![]).await {
-        tracing::info!("📝 Sayfa metni: {:?}", page_text.as_str().unwrap_or("").chars().take(500).collect::<String>());
+    if let Ok(result) = client.execute(js_close_qr_popup, vec![]).await {
+        if let Some(obj) = result.as_object() {
+            if obj.get("closed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                tracing::info!("✅ Popup kapatıldı");
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            }
+        }
+    }
+    
+    // Modal/popup içindeki metinleri logla
+    let js_get_modal_text = r#"
+        // Modal, dialog, popup elementlerini ara
+        const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content');
+        if (modals.length > 0) {
+            const modalText = Array.from(modals).map(m => m.innerText).join(' | ');
+            return { hasModal: true, text: modalText.substring(0, 500) };
+        }
+        
+        // Modal yoksa genel sayfa metni
+        const allText = document.body.innerText || '';
+        return { hasModal: false, text: allText.substring(0, 500) };
+    "#;
+    
+    if let Ok(result) = client.execute(js_get_modal_text, vec![]).await {
+        if let Some(obj) = result.as_object() {
+            let has_modal = obj.get("hasModal").and_then(|v| v.as_bool()).unwrap_or(false);
+            let text = obj.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if has_modal {
+                tracing::info!("📝 Modal/popup içeriği: {}", text);
+            } else {
+                tracing::info!("📝 Sayfa metni: {}", text);
+            }
+        }
     }
     
     // Ürün sayfasına git (Trafik/Kasko seçimi)
-    tracing::info!("🔍 {} ürünü seçiliyor...", product_type);
+    tracing::info!("🔍 {} ürünü seçiliyor (modal/popup içinde aranıyor)...", product_type);
     
-    // JavaScript ile ürün seçimi - tüm elementleri tara
+    // JavaScript ile ürün seçimi - önce modal içinde, sonra sayfada
     let js_select_product = format!(r#"
-        // Önce modal/popup içinde ara
-        const allElements = Array.from(document.querySelectorAll('*'));
-        for (const elem of allElements) {{
-            const text = (elem.innerText || elem.textContent || '').toLowerCase();
-            // Sadece element'in kendi metnini al (children hariç)
-            if (elem.children.length === 0 && text.includes('{}')) {{
-                // Tıklanabilir parent'ı bul
-                let clickable = elem;
-                while (clickable && !['BUTTON', 'A', 'DIV'].includes(clickable.tagName)) {{
-                    clickable = clickable.parentElement;
-                }}
-                if (clickable) {{
-                    clickable.click();
-                    return {{ found: true, text: text, tag: clickable.tagName }};
+        const productName = '{}';
+        
+        // 1. Önce modal/dialog/popup içinde ara
+        const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content, .p-sidebar');
+        for (const modal of modals) {{
+            // Modal içindeki tüm tıklanabilir elementleri ara
+            const clickables = modal.querySelectorAll('button, a, .card, .product-item, [role="button"], div[onclick]');
+            for (const elem of clickables) {{
+                const text = (elem.innerText || elem.textContent || '').toLowerCase();
+                // "trafik" kelimesini içeriyorsa VE yanlış bir şey değilse
+                if (text.includes(productName) && 
+                    !text.includes('kamyon') && 
+                    !text.includes('paket') && 
+                    !text.includes('indirim') &&
+                    text.length < 50) {{ // Kısa metinleri tercih et (başlıklar)
+                    elem.click();
+                    return {{ found: true, text: text, location: 'modal', tag: elem.tagName }};
                 }}
             }}
         }}
         
-        // Fallback: direkt button/a elementlerini ara
-        const buttons = Array.from(document.querySelectorAll('button, a, .card, .item, div[role="button"]'));
-        for (const btn of buttons) {{
-            const text = (btn.innerText || btn.textContent || '').toLowerCase();
-            if (text.includes('{}')) {{
-                btn.click();
-                return {{ found: true, text: btn.innerText || btn.textContent }};
+        // 2. Modal içinde bulamadıysa, genel sayfada ara
+        const allClickables = document.querySelectorAll('button, a, .card, .product-card, [role="button"]');
+        for (const elem of allClickables) {{
+            const text = (elem.innerText || elem.textContent || '').toLowerCase();
+            if (text === productName || 
+                (text.includes(productName) && text.length < 30 && !text.includes('paket'))) {{
+                elem.click();
+                return {{ found: true, text: text, location: 'page', tag: elem.tagName }};
             }}
         }}
         
         return {{ found: false }};
-    "#, product_type, product_type);
+    "#, product_type);
     
     let mut product_selected = false;
     match client.execute(&js_select_product, vec![]).await {
