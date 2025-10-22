@@ -314,6 +314,7 @@ async fn try_fill_input(client: &Client, selectors: &[&str], value: &str) -> Res
 }
 
 async fn try_click_button(client: &Client, selectors: &[&str]) -> Result<bool, ApiError> {
+    // CSS selector ile dene
     for selector in selectors {
         tracing::debug!("  → Deneniyor: {}", selector);
         match client.find(Locator::Css(selector)).await {
@@ -329,6 +330,51 @@ async fn try_click_button(client: &Client, selectors: &[&str]) -> Result<bool, A
             },
         }
     }
+    
+    // CSS selector başarısız, JavaScript ile dene
+    tracing::warn!("⚠️ CSS selector'larla buton bulunamadı, JavaScript ile deneniyor...");
+    
+    let js_find_and_click = r#"
+        // Submit button'u bul
+        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+        
+        // Görünür ve enabled butonları filtrele
+        const visibleButtons = buttons.filter(btn => {
+            const style = window.getComputedStyle(btn);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            if (btn.disabled) return false;
+            const rect = btn.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            return true;
+        });
+        
+        // Submit type olanı tercih et
+        let submitBtn = visibleButtons.find(btn => btn.type === 'submit');
+        if (!submitBtn) {
+            // İlk görünür butonu kullan
+            submitBtn = visibleButtons[0];
+        }
+        
+        if (submitBtn) {
+            submitBtn.click();
+            return 'clicked';
+        }
+        
+        return 'not_found';
+    "#;
+    
+    match client.execute(js_find_and_click, vec![]).await {
+        Ok(result) => {
+            if result.as_str() == Some("clicked") {
+                tracing::info!("  ✅ JavaScript ile buton tıklandı");
+                return Ok(true);
+            }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ JavaScript button click hatası: {}", e);
+        }
+    }
+    
     Ok(false)
 }
 

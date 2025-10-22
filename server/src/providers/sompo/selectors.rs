@@ -25,10 +25,10 @@ impl SompoSelectors {
     
     pub const LOGIN_BUTTONS: &'static [&'static str] = &[
         "button[type='submit']",
-        "button:has-text('Giriş')",
-        "button:has-text('GİRİŞ')",
-        "button:has-text('Login')",
         "input[type='submit']",
+        "button.login-btn",
+        "button.submit-btn",
+        ".submit-button",
     ];
     
     // OTP selectors
@@ -45,34 +45,34 @@ impl SompoSelectors {
     
     pub const OTP_SUBMIT_BUTTONS: &'static [&'static str] = &[
         "button[type='submit']",
-        "button:has-text('Doğrula')",
-        "button:has-text('Onayla')",
-        "button:has-text('Gönder')",
+        "input[type='submit']",
+        "button.submit-btn",
+        ".otp-submit",
     ];
     
     // Dashboard/success indicators
     pub const DASHBOARD_INDICATORS: &'static [&'static str] = &[
         "[class*='dashboard']",
         "[class*='home']",
-        "a:has-text('Çıkış')",
-        "a:has-text('Profil')",
+        "a[href*='logout']",
+        "a[href*='profile']",
+        ".user-menu",
+        ".logout-btn",
     ];
     
     // Product navigation
     pub const TRAFIK_LINKS: &'static [&'static str] = &[
-        "a:has-text('Trafik')",
-        "a:has-text('Trafik Sigortası')",
         "a[href*='trafik']",
         ".trafik-link",
         "#trafik",
+        "[data-product='trafik']",
     ];
     
     pub const KASKO_LINKS: &'static [&'static str] = &[
-        "a:has-text('Kasko')",
-        "a:has-text('Kasko Sigortası')",
         "a[href*='kasko']",
         ".kasko-link",
         "#kasko",
+        "[data-product='kasko']",
     ];
     
     // Form inputs
@@ -105,12 +105,10 @@ impl SompoSelectors {
     pub const FORM_SUBMIT_BUTTONS: &'static [&'static str] = &[
         "button[type='submit']",
         "input[type='submit']",
-        "button:has-text('Teklif Al')",
-        "button:has-text('TEKLİF AL')",
-        "button:has-text('Sorgula')",
-        "button:has-text('SORGULA')",
         ".submit-btn",
         "#submit-btn",
+        "button.teklif-btn",
+        "button.sorgula-btn",
     ];
     
     // Price/result selectors
@@ -125,9 +123,8 @@ impl SompoSelectors {
         "[class*='prim']",
         "[class*='amount']",
         "[class*='fiyat']",
-        "td:has-text('TL')",
-        "span:has-text('TL')",
-        "div:has-text('TL')",
+        ".price-value",
+        ".tutar",
     ];
     
     // Loading/waiting indicators
