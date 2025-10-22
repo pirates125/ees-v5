@@ -148,26 +148,78 @@ async fn handle_otp_cdp(
     for (i, otp) in otp_codes.iter().enumerate() {
         tracing::info!("Deneme {}: OTP = {}", i + 1, otp);
         
-        // OTP input'larını bul (separate digits)
-        let js_fill_otp = format!(r#"
-            const otp = '{}';
-            const inputs = Array.from(document.querySelectorAll('input[type="text"]:not([disabled])'))
-                .filter(inp => inp.offsetParent !== null)
-                .slice(0, 6);
-            
-            if (inputs.length === 6) {{
-                inputs.forEach((inp, idx) => {{
-                    inp.value = otp[idx] || '';
-                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                }});
-                return {{ filled: true, count: inputs.length }};
-            }}
-            return {{ filled: false, count: inputs.length }};
-        "#, otp);
+        // PYTHON YAKLAŞIMI: Tek input'a tüm kodu yaz (placeholder bazlı)
+        // Python: await page.fill('input[placeholder*="OTP"]', otp_code)
         
-        if let Ok(result) = page.evaluate(js_fill_otp.as_str()).await {
-            tracing::info!("OTP fill sonucu: {:?}", result);
+        let otp_selectors = vec![
+            "input[placeholder*='OTP']",
+            "input[placeholder*='Kod']",
+            "input[placeholder*='Doğrulama']",
+            "input[placeholder*='kod']",
+            "input[name*='otp']",
+        ];
+        
+        let mut otp_filled = false;
+        
+        for selector in otp_selectors {
+            if let Ok(otp_input) = page.find_element(selector).await {
+                tracing::info!("✅ OTP input bulundu: {}", selector);
+                
+                // Tüm 6 digit'i tek seferde yaz
+                if otp_input.click().await.is_ok() {
+                    if otp_input.type_str(otp).await.is_ok() {
+                        tracing::info!("✅ OTP yazıldı: {}", otp);
+                        otp_filled = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Fallback: JavaScript ile tüm input'ları dene
+        if !otp_filled {
+            tracing::info!("🔧 JavaScript fallback ile OTP dolduruluyor...");
+            
+            let js_fill_otp = format!(r#"
+                const otp = '{}';
+                
+                // 1. Placeholder bazlı tek input
+                const singleInput = document.querySelector('input[placeholder*="OTP"], input[placeholder*="Kod"], input[placeholder*="kod"]');
+                if (singleInput) {{
+                    singleInput.focus();
+                    singleInput.value = otp;
+                    singleInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    singleInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    return {{ filled: true, method: 'single_input', count: 1 }};
+                }}
+                
+                // 2. 6 ayrı input varsa (fallback)
+                const inputs = Array.from(document.querySelectorAll('input[type="text"]:not([disabled])'))
+                    .filter(inp => inp.offsetParent !== null)
+                    .slice(0, 6);
+                
+                if (inputs.length === 6) {{
+                    inputs.forEach((inp, idx) => {{
+                        inp.value = otp[idx] || '';
+                        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }});
+                    return {{ filled: true, method: 'separate_inputs', count: inputs.length }};
+                }}
+                
+                return {{ filled: false, count: 0 }};
+            "#, otp);
+            
+            if let Ok(result) = page.evaluate(js_fill_otp.as_str()).await {
+                tracing::info!("OTP fill sonucu: {:?}", result);
+                if let Ok(value) = result.into_value::<serde_json::Value>() {
+                    if let Some(obj) = value.as_object() {
+                        if obj.get("filled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            otp_filled = true;
+                        }
+                    }
+                }
+            }
         }
         
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -211,121 +263,47 @@ async fn handle_otp_cdp(
             }
         }
         
-        // AGRESIF SUBMIT - 5 farklı yöntem!
-        tracing::info!("🔍 OTP submit deneniyor (agresif mod)...");
+        // PYTHON YAKLAŞIMI: Submit button aramadan direkt URL değişimini bekle!
+        // Python: WebDriverWait(driver, 20).until(EC.url_changes(LOGIN_URL))
         
-        // Yöntem 1: Multiple selector patterns ile submit button ara
-        let submit_selectors = vec![
-            "button[type='submit']",
-            "button.submit-btn",
-            "button.otp-submit",
-            ".submit-button",
-            "input[type='submit']",
-        ];
+        tracing::info!("⏳ OTP auto-submit bekleniyor (Python benzeri)...");
         
-        let mut button_found = false;
-        for selector in submit_selectors {
-            if let Ok(btn) = page.find_element(selector).await {
-                if btn.click().await.is_ok() {
-                    tracing::info!("✅ Submit button tıklandı ({})", selector);
-                    button_found = true;
-                    break;
-                }
-            }
-        }
-        
-        // Yöntem 2: JavaScript ile agresif button arama
-        if !button_found {
-            tracing::info!("🔧 JavaScript ile submit button aranıyor...");
-            
-            let js_submit = r#"
-                // Keywords: doğrula, onayla, gönder, submit
-                const keywords = ['doğrula', 'onayla', 'gönder', 'submit', 'devam'];
-                const buttons = Array.from(document.querySelectorAll('button:not([disabled]), input[type="submit"]'));
-                
-                for (const btn of buttons) {
-                    const text = (btn.textContent || btn.value || '').toLowerCase().trim();
-                    if (keywords.some(kw => text.includes(kw))) {
-                        btn.click();
-                        return { clicked: true, text: text };
-                    }
-                }
-                
-                // Fallback: Herhangi bir submit type button
-                const anySubmit = document.querySelector('button[type="submit"], input[type="submit"]');
-                if (anySubmit) {
-                    anySubmit.click();
-                    return { clicked: true, text: 'fallback_submit' };
-                }
-                
-                return { clicked: false };
-            "#;
-            
-            if let Ok(result) = page.evaluate(js_submit).await {
-                tracing::info!("JS submit sonucu: {:?}", result);
-                if let Ok(value) = result.into_value::<serde_json::Value>() {
-                    if let Some(obj_map) = value.as_object() {
-                        if obj_map.get("clicked").and_then(|v| v.as_bool()).unwrap_or(false) {
-                            button_found = true;
-                            tracing::info!("✅ JavaScript submit başarılı!");
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Yöntem 3: Enter tuşu gönder (son input'a)
-        if !button_found {
-            tracing::info!("⌨️ Enter tuşu gönderiliyor...");
-            
-            let js_press_enter = r#"
-                const inputs = Array.from(document.querySelectorAll('input[type="text"]:not([disabled])'))
-                    .filter(inp => inp.offsetParent !== null);
-                
-                if (inputs.length > 0) {
-                    const lastInput = inputs[inputs.length - 1];
-                    lastInput.focus();
-                    
-                    // Enter tuşu simüle et
-                    const enterEvent = new KeyboardEvent('keydown', {
-                        key: 'Enter',
-                        code: 'Enter',
-                        keyCode: 13,
-                        bubbles: true,
-                        cancelable: true
-                    });
-                    lastInput.dispatchEvent(enterEvent);
-                    
-                    return { pressed: true };
-                }
-                return { pressed: false };
-            "#;
-            
-            if let Ok(result) = page.evaluate(js_press_enter).await {
-                tracing::info!("Enter tuşu sonucu: {:?}", result);
-            }
-        }
-        
-        // Yöntem 4: Navigation bekle (auto-submit olabilir)
-        tracing::info!("⏳ Navigation bekleniyor (auto-submit için)...");
-        
+        // 2 saniye bekle (OTP validation için)
         tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
         
-        // Navigation kontrolü
-        wait_for_navigation(page, 10).await.ok();
-        wait_for_network_idle(page, 5).await.ok();
+        let auth_url = "google-authenticator-validation";
         
-        // Dashboard'a ulaştık mı kontrol et
-        if let Ok(Some(url)) = page.url().await {
-            tracing::info!("📍 OTP sonrası URL: {}", url);
+        // URL değişimini bekle (maksimum 15 saniye)
+        for attempt in 0..30 {  // 30 * 500ms = 15 saniye
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
-            if url.contains("dashboard") && !url.contains("authenticator") {
-                tracing::info!("✅ OTP başarılı! Dashboard'a ulaşıldı");
-                return Ok(());
-            } else if !url.contains("authenticator") {
-                // Başka bir sayfaya gittiyse (captcha, bot detection vb.)
-                tracing::info!("⚠️ Beklenmeyen sayfa: {}", url);
+            if let Ok(Some(current_url)) = page.url().await {
+                tracing::debug!("URL check {}: {}", attempt + 1, current_url);
+                
+                // URL değişti mi?
+                if !current_url.contains(auth_url) {
+                    tracing::info!("✅ URL değişti: {}", current_url);
+                    
+                    // Dashboard'a ulaştık mı?
+                    if current_url.contains("dashboard") {
+                        tracing::info!("✅ OTP başarılı! Dashboard'a ulaşıldı");
+                        
+                        // Network idle bekle
+                        wait_for_network_idle(page, 5).await.ok();
+                        
+                        return Ok(());
+                    } else {
+                        // Başka bir sayfaya gitti (captcha, bot detection vb.)
+                        tracing::warn!("⚠️ Beklenmeyen sayfa: {}", current_url);
+                        break;
+                    }
+                }
             }
+        }
+        
+        // URL hala değişmediyse log
+        if let Ok(Some(url)) = page.url().await {
+            tracing::info!("📍 15 saniye sonra hala aynı URL: {}", url);
         }
     }
     
