@@ -19,6 +19,7 @@ fantoccini = "0.21"
 
 # OTP
 totp-lite = "2.0"
+data-encoding = "2.5"  # Base32 decode for TOTP secret
 
 # Decimal for precise currency handling
 rust_decimal = "1.33"

@@ -459,9 +459,31 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
         ));
     }
     
-    // TOTP kodu üret
-    let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, secret_key.as_bytes(), 0);
+    // Base32 decode et (Google Authenticator secret'ı base32 formatında)
+    let secret_bytes = match data_encoding::BASE32.decode(secret_key.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("❌ Base32 decode hatası: {}", e);
+            tracing::error!("   SECRET_KEY geçersiz base32 string: {}", secret_key);
+            return Err(ApiError::HumanActionRequired(
+                format!("SOMPO_SECRET_KEY base32 decode edilemedi: {}", e)
+            ));
+        }
+    };
+    
+    tracing::debug!("🔑 Secret key base32 decode edildi ({} bytes)", secret_bytes.len());
+    
+    // TOTP kodu üret (Python pyotp ile aynı: 30s interval, 6 digits, SHA1)
+    let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, 0);
     tracing::info!("🔢 OTP kodu üretildi: {}", totp);
+    
+    // Time sync uyarısı
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    tracing::debug!("⏰ Sistem zamanı (Unix timestamp): {}", now);
+    tracing::debug!("   NOT: TOTP time-based'dir. Sunucu saati NTP ile sync olmalı!");
     
     // Screenshot al (OTP ekranı)
     if let Ok(screenshot) = client.screenshot().await {
