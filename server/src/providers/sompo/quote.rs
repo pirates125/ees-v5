@@ -80,12 +80,47 @@ pub async fn fetch_sompo_quote(
         tracing::warn!("⚠️ YENİ İŞ TEKLİFİ butonu bulunamadı, direkt ürün seçimine geçiliyor");
     }
     
+    // YENİ İŞ TEKLİFİ butonuna tıkladıktan sonra ne oldu? Kontrol et
+    if let Ok(current_url) = client.current_url().await {
+        tracing::info!("📍 YENİ İŞ TEKLİFİ sonrası URL: {}", current_url);
+    }
+    
+    // Sayfadaki tüm görünür metinleri logla (debugging)
+    let js_get_page_text = r#"
+        const allText = document.body.innerText || '';
+        const lines = allText.split('\n').filter(l => l.trim().length > 0).slice(0, 30);
+        return lines.join(' | ');
+    "#;
+    
+    if let Ok(page_text) = client.execute(js_get_page_text, vec![]).await {
+        tracing::info!("📝 Sayfa metni: {:?}", page_text.as_str().unwrap_or("").chars().take(500).collect::<String>());
+    }
+    
     // Ürün sayfasına git (Trafik/Kasko seçimi)
     tracing::info!("🔍 {} ürünü seçiliyor...", product_type);
     
-    // JavaScript ile ürün seçimi - daha güvenilir
+    // JavaScript ile ürün seçimi - tüm elementleri tara
     let js_select_product = format!(r#"
-        const buttons = Array.from(document.querySelectorAll('button, a, .product-card, .product-item'));
+        // Önce modal/popup içinde ara
+        const allElements = Array.from(document.querySelectorAll('*'));
+        for (const elem of allElements) {{
+            const text = (elem.innerText || elem.textContent || '').toLowerCase();
+            // Sadece element'in kendi metnini al (children hariç)
+            if (elem.children.length === 0 && text.includes('{}')) {{
+                // Tıklanabilir parent'ı bul
+                let clickable = elem;
+                while (clickable && !['BUTTON', 'A', 'DIV'].includes(clickable.tagName)) {{
+                    clickable = clickable.parentElement;
+                }}
+                if (clickable) {{
+                    clickable.click();
+                    return {{ found: true, text: text, tag: clickable.tagName }};
+                }}
+            }}
+        }}
+        
+        // Fallback: direkt button/a elementlerini ara
+        const buttons = Array.from(document.querySelectorAll('button, a, .card, .item, div[role="button"]'));
         for (const btn of buttons) {{
             const text = (btn.innerText || btn.textContent || '').toLowerCase();
             if (text.includes('{}')) {{
@@ -93,8 +128,9 @@ pub async fn fetch_sompo_quote(
                 return {{ found: true, text: btn.innerText || btn.textContent }};
             }}
         }}
+        
         return {{ found: false }};
-    "#, product_type);
+    "#, product_type, product_type);
     
     let mut product_selected = false;
     match client.execute(&js_select_product, vec![]).await {
