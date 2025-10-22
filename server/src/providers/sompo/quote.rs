@@ -101,7 +101,7 @@ pub async fn fetch_sompo_quote(
     // Ek alanlar (varsa)
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     
-    // Form submit
+    // Form submit - CSS selectors ile dene
     let mut form_submitted = false;
     for selector in SompoSelectors::FORM_SUBMIT_BUTTONS {
         if let Ok(elem) = client.find(Locator::Css(selector)).await {
@@ -113,7 +113,73 @@ pub async fn fetch_sompo_quote(
         }
     }
     
+    // CSS selectors başarısızsa, JavaScript ile button bul ve tıkla
     if !form_submitted {
+        tracing::info!("🔍 CSS selectors başarısız, JavaScript ile button aranıyor...");
+        
+        let js_find_submit = r#"
+            // Teklif/Sorgula/Hesapla gibi buttonları bul
+            const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'submit'];
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn'));
+            
+            for (const btn of buttons) {
+                const text = btn.innerText || btn.value || '';
+                if (keywords.some(kw => text.toLowerCase().includes(kw))) {
+                    btn.click();
+                    return { found: true, text: text };
+                }
+            }
+            
+            // Form içindeki herhangi bir submit button
+            const formSubmit = document.querySelector('form button[type="submit"]');
+            if (formSubmit) {
+                formSubmit.click();
+                return { found: true, text: 'form[submit]' };
+            }
+            
+            return { found: false };
+        "#;
+        
+        match client.execute(js_find_submit, vec![]).await {
+            Ok(result) => {
+                tracing::info!("🔧 JavaScript button search sonucu: {:?}", result);
+                if let Some(obj) = result.as_object() {
+                    if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        form_submitted = true;
+                        tracing::info!("✅ JavaScript ile form submit edildi!");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ JavaScript button search hatası: {}", e);
+            }
+        }
+    }
+    
+    if !form_submitted {
+        // Screenshot al (debug için)
+        if let Ok(png_data) = client.screenshot().await {
+            let screenshot_path = format!("sompo_form_submit_error.png");
+            if let Ok(_) = std::fs::write(&screenshot_path, &png_data) {
+                tracing::info!("📸 Form screenshot kaydedildi: {}", screenshot_path);
+            }
+        }
+        
+        // Sayfadaki tüm buttonları logla
+        let js_list_buttons = r#"
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+            return buttons.map(b => ({
+                tag: b.tagName,
+                type: b.type || '',
+                text: b.innerText || b.value || '',
+                class: b.className || ''
+            })).slice(0, 10);
+        "#;
+        
+        if let Ok(buttons) = client.execute(js_list_buttons, vec![]).await {
+            tracing::info!("📋 Sayfadaki buttonlar: {:?}", buttons);
+        }
+        
         let _ = client.close().await;
         return Err(ApiError::FormValidation("Form submit butonu bulunamadı".to_string()));
     }
