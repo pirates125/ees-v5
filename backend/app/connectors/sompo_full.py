@@ -230,19 +230,40 @@ def main():
             try:
                 print(f"[INFO] Ürün seçimi denemesi {attempt + 1}/3", file=sys.stderr)
                 
-                # JavaScript ile bul ve tıkla (tek işlemde)
+                # İlk denemede debug bilgisi topla
+                if attempt == 0:
+                    js_debug_buttons = """
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const visibleButtons = buttons.filter(b => b.offsetParent !== null && !b.disabled);
+                    
+                    return visibleButtons.slice(0, 20).map(btn => ({
+                        text: (btn.textContent || btn.innerText || '').trim().substring(0, 60),
+                        class: btn.className,
+                        visible: btn.offsetParent !== null,
+                        disabled: btn.disabled
+                    }));
+                    """
+                    
+                    try:
+                        debug_buttons = driver.execute_script(js_debug_buttons)
+                        print(f"[DEBUG] Görünen butonlar ({len(debug_buttons)}):", file=sys.stderr)
+                        for i, btn_info in enumerate(debug_buttons[:10]):  # İlk 10 butonu logla
+                            print(f"  {i+1}. '{btn_info['text']}' (class={btn_info.get('class', '')[:30]})", file=sys.stderr)
+                    except:
+                        pass
+                
+                # JavaScript ile bul ve tıkla (daha esnek matching)
                 js_click_product = """
                 const keywords = arguments[0];
-                const buttons = Array.from(document.querySelectorAll('button'));
+                const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
                 
                 for (const btn of buttons) {
                     const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
                     
-                    // Keyword match ve "teklif" içeriyor mu?
+                    // Daha esnek matching: sadece keyword yeterli (teklif kelimesi olmayabilir)
                     const hasKeyword = keywords.some(kw => btnText.includes(kw));
-                    const hasTeklif = btnText.includes('teklif');
                     
-                    if (hasKeyword && hasTeklif && btn.offsetParent !== null && !btn.disabled) {
+                    if (hasKeyword && btn.offsetParent !== null && !btn.disabled) {
                         // Scroll to view
                         btn.scrollIntoView({block: 'center', behavior: 'smooth'});
                         
@@ -271,11 +292,11 @@ def main():
                     break
                 else:
                     print(f"[WARNING] Ürün butonu bulunamadı (deneme {attempt + 1})", file=sys.stderr)
-                    time.sleep(2)
+                    time.sleep(3)  # Daha uzun bekle
                     
             except Exception as e:
                 print(f"[WARNING] Ürün seçimi hatası (deneme {attempt + 1}): {str(e)[:100]}", file=sys.stderr)
-                time.sleep(2)
+                time.sleep(3)
         
         if not product_selected:
             # Screenshot al
