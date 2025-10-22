@@ -518,15 +518,76 @@ async def main():
                 await page.screenshot(path="debug_modal_not_found.png", full_page=True)
                 print(f"[ERROR] Ürün seçilemedi, screenshot: debug_modal_not_found.png", file=sys.stderr)
             
+            # "Teklif Al" butonunu bekle ve tıkla
+            print(f"[INFO] Modal'da 'Teklif Al' butonu aranıyor...", file=sys.stderr)
+            await page.wait_for_timeout(1000)
+            
+            teklif_al_clicked = False
+            teklif_al_selectors = [
+                'button:has-text("Teklif Al")',
+                'button:has-text("TEKLİF AL")',
+                'a:has-text("Teklif Al")',
+                'button:has-text("teklif")',
+            ]
+            
+            for selector in teklif_al_selectors:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn:
+                        await btn.click()
+                        print(f"[INFO] 'Teklif Al' tıklandı ✅ (selector: {selector})", file=sys.stderr)
+                        teklif_al_clicked = True
+                        await page.wait_for_timeout(2000)
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] {selector} denendi, hata: {str(e)[:50]}", file=sys.stderr)
+                    continue
+            
+            if not teklif_al_clicked:
+                print(f"[WARNING] 'Teklif Al' butonu bulunamadı, JavaScript ile deneniyor", file=sys.stderr)
+                
+                js_teklif_al = """
+                    (() => {
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const teklifBtn = buttons.find(b => 
+                            b.offsetParent !== null && 
+                            (b.textContent || '').toLowerCase().includes('teklif')
+                        );
+                        
+                        if (teklifBtn) {
+                            teklifBtn.scrollIntoView({block: 'center'});
+                            teklifBtn.click();
+                            return {success: true, text: (teklifBtn.textContent || '').trim()};
+                        }
+                        
+                        return {success: false};
+                    })()
+                """
+                
+                try:
+                    result = await page.evaluate(js_teklif_al)
+                    if result.get('success'):
+                        print(f"[INFO] 'Teklif Al' tıklandı (JS): {result.get('text', 'unknown')}", file=sys.stderr)
+                        teklif_al_clicked = True
+                        await page.wait_for_timeout(2000)
+                    else:
+                        print(f"[ERROR] 'Teklif Al' butonu bulunamadı ❌", file=sys.stderr)
+                except Exception as e:
+                    print(f"[ERROR] JavaScript click hatası: {str(e)[:100]}", file=sys.stderr)
+            
             # Sayfa yüklensin ve URL değişimini bekle
+            print(f"[INFO] Form sayfasına geçiş bekleniyor...", file=sys.stderr)
+            current_url_before = page.url
+            
             try:
                 # URL değişimi bekle (trafik/kasko form sayfası)
-                await page.wait_for_url(lambda url: "trafik" in url.lower() or "kasko" in url.lower() or url != page.url, timeout=10000)
+                await page.wait_for_url(lambda url: "dashboard" not in url or url != current_url_before, timeout=10000)
                 print(f"[INFO] Form sayfasına geçildi: {page.url}", file=sys.stderr)
             except:
-                print(f"[WARNING] URL değişmedi, devam ediliyor: {page.url}", file=sys.stderr)
+                print(f"[WARNING] URL timeout, devam ediliyor: {page.url}", file=sys.stderr)
             
             await page.wait_for_load_state("networkidle", timeout=10000)
+            await page.wait_for_timeout(2000)  # Ekstra bekleme - form yüklensin
             
             # Form screenshot
             await page.screenshot(path="debug_before_form.png", full_page=True)
