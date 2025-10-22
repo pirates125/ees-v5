@@ -2,6 +2,7 @@ mod login;
 mod parser;
 mod quote;
 mod quote_cdp;  // CDP implementation
+mod python_login;  // Python subprocess login
 mod selectors;
 
 use crate::config::Config;

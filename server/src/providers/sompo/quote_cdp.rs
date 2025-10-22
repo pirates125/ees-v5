@@ -1,6 +1,8 @@
 use crate::browser::{create_cdp_browser, inject_anti_detection, wait_for_navigation, wait_for_network_idle};
+use crate::browser::session::SessionManager;
 use crate::config::Config;
 use crate::http::{ApiError, Coverage, Installment, PremiumDetail, QuoteRequest, QuoteResponse, Timings};
+use crate::providers::sompo::python_login::login_via_python;
 use chromiumoxide::Page;
 use data_encoding::BASE32;
 use std::sync::Arc;
@@ -16,7 +18,38 @@ pub async fn fetch_sompo_quote_cdp(
         .unwrap()
         .as_millis() as u64;
     
-    tracing::info!("🚀 Sompo CDP quote başlatıldı: request_id={}", request.quote_meta.request_id);
+    tracing::info!("🚀 Sompo CDP quote başlatıldı (Python Hybrid): request_id={}", request.quote_meta.request_id);
+    
+    // Session manager
+    let session_manager = SessionManager::new(&config.session_dir);
+    
+    // Python ile login ve session al
+    let session = match login_via_python(&config).await {
+        Ok(s) => {
+            // Session'ı kaydet (cache için)
+            session_manager.save_session("sompo", s.clone()).ok();
+            s
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ Python login başarısız: {}", e);
+            tracing::info!("🔄 Fallback: CDP native login deneniyor...");
+            
+            // Fallback: CDP native login
+            let mut browser = create_cdp_browser(&config).await
+                .map_err(|e| ApiError::WebDriverError(format!("CDP Browser başlatılamadı: {}", e)))?;
+            let page = browser.new_page("about:blank").await
+                .map_err(|e| ApiError::WebDriverError(format!("Page oluşturulamadı: {}", e)))?;
+            inject_anti_detection(&page).await.ok();
+            login_to_sompo_cdp(&page, &config).await?;
+            
+            // Bu browser ile devam et - session yok
+            let result = get_quote_cdp(&page, &request, scrape_start).await;
+            let _ = browser.close().await;
+            return result;
+        }
+    };
+    
+    tracing::info!("✅ Session alındı: {} cookies", session.cookies.len());
     
     // Browser başlat
     let mut browser = create_cdp_browser(&config)
@@ -31,8 +64,8 @@ pub async fn fetch_sompo_quote_cdp(
     // Anti-detection
     inject_anti_detection(&page).await.ok();
     
-    // Login
-    login_to_sompo_cdp(&page, &config).await?;
+    // Session restore
+    restore_session(&page, session).await?;
     
     // Quote al
     let result = get_quote_cdp(&page, &request, scrape_start).await;
@@ -533,5 +566,85 @@ fn parse_tl_price(text: &str) -> Result<f64, ApiError> {
     
     cleaned.parse::<f64>()
         .map_err(|e| ApiError::ParseError(format!("Fiyat parse hatası: {} (text: '{}')", e, text)))
+}
+
+/// Session restore (cookies + localStorage)
+async fn restore_session(
+    page: &Page,
+    session: crate::browser::session::SessionData,
+) -> Result<(), ApiError> {
+    tracing::info!("🔄 Session restore başlatılıyor...");
+    
+    // İlk olarak base URL'e git (cookies set etmek için)
+    page.goto("https://ejento.somposigorta.com.tr")
+        .await
+        .map_err(|e| ApiError::WebDriverError(format!("Base URL yüklenemedi: {}", e)))?;
+    
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    
+    // Cookies set et
+    tracing::info!("🍪 {} cookies restore ediliyor...", session.cookies.len());
+    
+    for cookie in &session.cookies {
+        // CDP SetCookie params oluştur
+        let js_set_cookie = format!(r#"
+            document.cookie = '{}={}; domain={}; path={}; {}{}';
+        "#,
+            cookie.name,
+            cookie.value,
+            cookie.domain,
+            cookie.path,
+            if cookie.secure { "secure; " } else { "" },
+            if cookie.http_only { "httponly; " } else { "" }
+        );
+        
+        page.evaluate(js_set_cookie.as_str()).await.ok();
+    }
+    
+    tracing::info!("✅ Cookies set edildi");
+    
+    // localStorage restore
+    if !session.local_storage.is_empty() {
+        tracing::info!("💾 {} localStorage items restore ediliyor...", session.local_storage.len());
+        
+        let local_storage_json = serde_json::to_string(&session.local_storage)
+            .map_err(|e| ApiError::ParseError(format!("localStorage JSON hatası: {}", e)))?;
+        
+        let js_restore_storage = format!(r#"
+            const storage = {};
+            Object.keys(storage).forEach(key => {{
+                try {{
+                    localStorage.setItem(key, storage[key]);
+                }} catch(e) {{
+                    console.error('localStorage set error:', key, e);
+                }}
+            }});
+            return Object.keys(storage).length;
+        "#, local_storage_json);
+        
+        if let Ok(result) = page.evaluate(js_restore_storage.as_str()).await {
+            tracing::info!("✅ localStorage restore edildi: {:?}", result);
+        }
+    }
+    
+    // Dashboard'a git (session restore sonrası)
+    tracing::info!("🏠 Dashboard'a yönlendiriliyor...");
+    page.goto("https://ejento.somposigorta.com.tr/dashboard")
+        .await
+        .map_err(|e| ApiError::WebDriverError(format!("Dashboard yüklenemedi: {}", e)))?;
+    
+    // Network idle bekle
+    wait_for_network_idle(page, 5).await.ok();
+    
+    // URL kontrolü
+    if let Ok(Some(url)) = page.url().await {
+        if url.contains("login") {
+            return Err(ApiError::LoginFailed("Session restore başarısız - login sayfasına yönlendirildi".to_string()));
+        }
+        
+        tracing::info!("✅ Session restore başarılı! URL: {}", url);
+    }
+    
+    Ok(())
 }
 
