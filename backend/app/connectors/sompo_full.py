@@ -189,16 +189,31 @@ def main():
         # Wait for dashboard to fully load
         time.sleep(3)
         
-        # YENİ İŞ TEKLİFİ butonu (opsiyonel - popup otomatik açılabilir)
+        # YENİ İŞ TEKLİFİ butonu (popup açmak için)
         try:
             new_offer_btn = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, '//button[contains(., "YENİ İŞ TEKLİFİ")]'))
             )
             driver.execute_script("arguments[0].click();", new_offer_btn)
             print(f"[INFO] Yeni İş Teklifi butonu tıklandı", file=sys.stderr)
-            time.sleep(2)
-        except:
-            print(f"[INFO] Yeni İş Teklifi butonu bulunamadı (popup zaten açık olabilir)", file=sys.stderr)
+            
+            # Popup'ın açılmasını bekle (modal/dialog/overlay)
+            print(f"[INFO] Popup yükleniyor...", file=sys.stderr)
+            time.sleep(3)
+            
+            # Popup açıldı mı kontrol et
+            popup_opened = driver.execute_script("""
+                const popup = document.querySelector('.p-dialog, .modal, .p-overlay, [role="dialog"]');
+                return popup && popup.offsetParent !== null;
+            """)
+            
+            if popup_opened:
+                print(f"[INFO] Popup açıldı", file=sys.stderr)
+            else:
+                print(f"[WARNING] Popup açılmamış olabilir", file=sys.stderr)
+                
+        except Exception as e:
+            print(f"[WARNING] Yeni İş Teklifi butonu hatası: {str(e)[:100]}", file=sys.stderr)
         
         # QR popup kapat (varsa)
         try:
@@ -224,6 +239,10 @@ def main():
         
         print(f"[INFO] Ürün seçiliyor: {product_type}", file=sys.stderr)
         
+        # Ürün butonlarının yüklenmesini bekle
+        print(f"[INFO] Ürün butonları yükleniyor...", file=sys.stderr)
+        time.sleep(3)
+        
         # JavaScript ile ürün butonunu bul ve tıkla (stale element hatası almamak için)
         product_selected = False
         for attempt in range(3):  # 3 deneme
@@ -236,21 +255,34 @@ def main():
                     const buttons = Array.from(document.querySelectorAll('button'));
                     const visibleButtons = buttons.filter(b => b.offsetParent !== null && !b.disabled);
                     
-                    return visibleButtons.slice(0, 20).map(btn => ({
-                        text: (btn.textContent || btn.innerText || '').trim().substring(0, 60),
-                        class: btn.className,
-                        visible: btn.offsetParent !== null,
-                        disabled: btn.disabled
-                    }));
+                    // TEKLİF AL butonlarını ayrıca göster
+                    const teklifButtons = visibleButtons.filter(b => 
+                        (b.textContent || '').toLowerCase().includes('teklif')
+                    );
+                    
+                    return {
+                        all: visibleButtons.slice(0, 15).map(btn => ({
+                            text: (btn.textContent || btn.innerText || '').trim().substring(0, 60),
+                            class: btn.className.substring(0, 30)
+                        })),
+                        teklif: teklifButtons.map(btn => ({
+                            text: (btn.textContent || '').trim().substring(0, 80),
+                            parent: btn.parentElement ? (btn.parentElement.textContent || '').trim().substring(0, 100) : 'no parent'
+                        }))
+                    };
                     """
                     
                     try:
-                        debug_buttons = driver.execute_script(js_debug_buttons)
-                        print(f"[DEBUG] Görünen butonlar ({len(debug_buttons)}):", file=sys.stderr)
-                        for i, btn_info in enumerate(debug_buttons[:10]):  # İlk 10 butonu logla
-                            print(f"  {i+1}. '{btn_info['text']}' (class={btn_info.get('class', '')[:30]})", file=sys.stderr)
-                    except:
-                        pass
+                        debug_result = driver.execute_script(js_debug_buttons)
+                        print(f"[DEBUG] Tüm görünen butonlar ({len(debug_result.get('all', []))}):", file=sys.stderr)
+                        for i, btn_info in enumerate(debug_result.get('all', [])[:10]):
+                            print(f"  {i+1}. '{btn_info['text']}' (class={btn_info.get('class', '')})", file=sys.stderr)
+                        
+                        print(f"[DEBUG] TEKLİF AL butonları ({len(debug_result.get('teklif', []))}):", file=sys.stderr)
+                        for i, btn_info in enumerate(debug_result.get('teklif', [])):
+                            print(f"  {i+1}. '{btn_info['text']}' (parent={btn_info.get('parent', '')[:50]})", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[DEBUG] Debug error: {str(e)[:100]}", file=sys.stderr)
                 
                 # JavaScript ile bul ve tıkla (parent container'da ürün ismi var!)
                 js_click_product = """
