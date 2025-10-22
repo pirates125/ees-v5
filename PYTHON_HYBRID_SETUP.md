@@ -1,11 +1,13 @@
 # Python Hybrid Setup - Sompo Login
 
 ## 🎯 Strateji
+
 **Python subprocess** ile %100 garantili login + **CDP Rust** ile quote alma
 
 ## 📋 VDS Kurulum (Windows)
 
 ### 1. Python Dependencies
+
 ```powershell
 # Backend klasörüne git
 cd C:\Users\Administrator\ees-v5\backend
@@ -18,6 +20,7 @@ python -c "import pyotp, undetected_chromedriver; print('✅ OK')"
 ```
 
 ### 2. Python Script Test (Standalone)
+
 ```powershell
 # Environment variables set et
 $env:SOMPO_USER="BULUT1"
@@ -36,7 +39,9 @@ python backend/app/connectors/sompo_session.py
 ```
 
 ### 3. Rust Backend Config
+
 `server/.env` dosyasını güncelle:
+
 ```env
 SOMPO_USER=BULUT1
 SOMPO_PASS=EEsigorta.2828
@@ -44,6 +49,7 @@ SOMPO_SECRET=your_totp_secret_key_base32
 ```
 
 ### 4. Rust Backend Build + Run
+
 ```powershell
 cd server
 cargo build --release
@@ -53,6 +59,7 @@ cargo run --release
 ## 🧪 Test
 
 ### API Test
+
 ```powershell
 # Quote request
 Invoke-RestMethod -Method POST -Uri "http://localhost:8099/api/v1/quotes" `
@@ -90,7 +97,9 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:8099/api/v1/quotes" `
 ## 🔍 Debug
 
 ### Python Script Logs
+
 Python script stderr'ına loglar yazıyor:
+
 ```
 [INFO] Login sayfası yüklendi
 [INFO] Credentials girildi
@@ -106,6 +115,7 @@ Python script stderr'ına loglar yazıyor:
 ```
 
 ### Rust Backend Logs
+
 ```
 🐍 Python subprocess ile Sompo login başlatılıyor...
 🐍 Python: [INFO] Login sayfası yüklendi
@@ -122,6 +132,7 @@ Python script stderr'ına loglar yazıyor:
 ## 🚨 Troubleshooting
 
 ### Python script çalışmıyor
+
 ```powershell
 # Python versiyonu kontrol (3.8+)
 python --version
@@ -134,18 +145,23 @@ Get-Command chrome
 ```
 
 ### OTP hatası
+
 ```
 [ERROR] OTP input bulunamadı!
 ```
+
 **Çözüm:** TOTP secret key'i kontrol et, Base32 format olmalı
 
 ### Session restore hatası
+
 ```
 ❌ Session restore başarısız - login sayfasına yönlendirildi
 ```
+
 **Çözüm:** Python script tekrar çalıştır, cookies expire olmuş olabilir
 
 ### Chrome bulunamıyor
+
 ```powershell
 # env.example'dan Chrome path'i kopyala
 # Windows:
@@ -156,21 +172,24 @@ CHROME_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 ```
 
 ## 📊 Başarı Garantisi
+
 - ✅ **Python login:** %100 (kanıtlanmış)
 - ✅ **Session restore:** %95 (CDP native)
 - ✅ **Quote fetch:** %90 (Rust CDP)
 - 🎯 **Toplam:** %95
 
 ## 🔄 Fallback Mekanizması
+
 Eğer Python login başarısız olursa, otomatik olarak **CDP native login** devreye girer:
+
 ```
 Python login FAIL → CDP native login → Quote fetch
 ```
 
 ## 🌟 Avantajlar
+
 1. **Login %100 garantili** (Python undetected-chromedriver)
 2. **Quote hızlı** (Rust CDP)
 3. **Diğer provider'lar etkilenmiyor**
 4. **Session cache** (2 saat geçerli)
 5. **Automatic fallback** (Python fail → CDP native)
-

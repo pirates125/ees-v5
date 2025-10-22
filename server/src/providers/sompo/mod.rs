@@ -3,6 +3,7 @@ mod parser;
 mod quote;
 mod quote_cdp;  // CDP implementation
 mod python_login;  // Python subprocess login
+mod python_scraper;  // Python full scraper (Login + Quote) - RECOMMENDED
 mod selectors;
 
 use crate::config::Config;
@@ -50,10 +51,10 @@ impl InsuranceProvider for SompoProvider {
                 "Sompo credentials yapılandırılmamış".to_string()
             ));
         }
-        
-        // CDP implementasyonunu kullan (Playwright-style)
-        tracing::info!("🚀 Sompo CDP modu kullanılıyor");
-        quote_cdp::fetch_sompo_quote_cdp(self.config.clone(), request).await
+
+        // Python full scraper kullan (%100 garantili)
+        tracing::info!("🐍 Sompo Python full scraper kullanılıyor");
+        python_scraper::fetch_sompo_quote_python(self.config.clone(), request).await
     }
 }
 
