@@ -186,16 +186,19 @@ def main():
         
         # ==================== QUOTE ====================
         
-        # YENİ İŞ TEKLİFİ butonu
+        # Wait for dashboard to fully load
+        time.sleep(3)
+        
+        # YENİ İŞ TEKLİFİ butonu (opsiyonel - popup otomatik açılabilir)
         try:
-            new_offer_btn = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//button[contains(., "YENİ İŞ TEKLİFİ")]'))
+            new_offer_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[contains(., "YENİ İŞ TEKLİFİ")]'))
             )
-            new_offer_btn.click()
+            driver.execute_script("arguments[0].click();", new_offer_btn)
             print(f"[INFO] Yeni İş Teklifi butonu tıklandı", file=sys.stderr)
             time.sleep(2)
         except:
-            print(f"[WARNING] Yeni İş Teklifi butonu bulunamadı", file=sys.stderr)
+            print(f"[INFO] Yeni İş Teklifi butonu bulunamadı (popup zaten açık olabilir)", file=sys.stderr)
         
         # QR popup kapat (varsa)
         try:
@@ -212,7 +215,7 @@ def main():
         except:
             pass
         
-        # Ürün seçimi (Trafik/Kasko)
+        # Ürün seçimi (Trafik/Kasko) - JavaScript ile robust
         product_keywords = {
             'trafik': ['trafik', 'zorunlu'],
             'kasko': ['kasko']
@@ -221,86 +224,175 @@ def main():
         
         print(f"[INFO] Ürün seçiliyor: {product_type}", file=sys.stderr)
         
-        # Ürün butonunu bul ve tıkla
+        # JavaScript ile ürün butonunu bul ve tıkla (stale element hatası almamak için)
         product_selected = False
-        try:
-            buttons = driver.find_elements(By.TAG_NAME, 'button')
-            for btn in buttons:
-                btn_text = btn.text.lower()
-                if any(kw in btn_text for kw in keywords) and 'teklif' in btn_text:
-                    # Trafik/Kasko + "Teklif Al" gibi
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                    time.sleep(0.5)
-                    driver.execute_script("arguments[0].click();", btn)
-                    print(f"[INFO] Ürün butonu tıklandı: {btn_text[:30]}", file=sys.stderr)
+        for attempt in range(3):  # 3 deneme
+            try:
+                print(f"[INFO] Ürün seçimi denemesi {attempt + 1}/3", file=sys.stderr)
+                
+                # JavaScript ile bul ve tıkla (tek işlemde)
+                js_click_product = """
+                const keywords = arguments[0];
+                const buttons = Array.from(document.querySelectorAll('button'));
+                
+                for (const btn of buttons) {
+                    const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
+                    
+                    // Keyword match ve "teklif" içeriyor mu?
+                    const hasKeyword = keywords.some(kw => btnText.includes(kw));
+                    const hasTeklif = btnText.includes('teklif');
+                    
+                    if (hasKeyword && hasTeklif && btn.offsetParent !== null && !btn.disabled) {
+                        // Scroll to view
+                        btn.scrollIntoView({block: 'center', behavior: 'smooth'});
+                        
+                        // Wait a bit for scroll
+                        setTimeout(() => {}, 300);
+                        
+                        // Click
+                        btn.click();
+                        
+                        return {
+                            success: true,
+                            text: btnText.substring(0, 50)
+                        };
+                    }
+                }
+                
+                return {success: false};
+                """
+                
+                result = driver.execute_script(js_click_product, keywords)
+                
+                if result.get('success'):
+                    print(f"[INFO] Ürün butonu tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
                     product_selected = True
                     time.sleep(3)
                     break
-        except Exception as e:
-            print(f"[WARNING] Ürün seçimi hatası: {e}", file=sys.stderr)
+                else:
+                    print(f"[WARNING] Ürün butonu bulunamadı (deneme {attempt + 1})", file=sys.stderr)
+                    time.sleep(2)
+                    
+            except Exception as e:
+                print(f"[WARNING] Ürün seçimi hatası (deneme {attempt + 1}): {str(e)[:100]}", file=sys.stderr)
+                time.sleep(2)
         
         if not product_selected:
+            # Screenshot al
+            driver.save_screenshot("debug_product_not_found.png")
+            print(f"[DEBUG] Screenshot: debug_product_not_found.png", file=sys.stderr)
             print(json.dumps({"error": f"{product_type} ürünü seçilemedi"}), file=sys.stderr)
             sys.exit(1)
         
-        # Form doldur - Plaka ve TCKN
+        # Form doldur - Plaka ve TCKN (JavaScript ile robust)
         print(f"[INFO] Form dolduruluyor: Plaka={plate}, TCKN={tckn}", file=sys.stderr)
         
-        # Plaka input
-        plaka_filled = False
+        # JavaScript ile form doldur (stale element hatası almamak için)
+        js_fill_form = """
+        const plate = arguments[0];
+        const tckn = arguments[1];
+        
+        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
+        const visibleInputs = inputs.filter(inp => inp.offsetParent !== null && !inp.disabled);
+        
+        let plakaDone = false;
+        let tcknDone = false;
+        
+        for (const inp of visibleInputs) {
+            const placeholder = (inp.placeholder || '').toLowerCase();
+            const name = (inp.name || '').toLowerCase();
+            const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
+            
+            // Plaka
+            if (!plakaDone && (placeholder.includes('plak') || name.includes('plak') || label.includes('plak'))) {
+                inp.focus();
+                inp.value = '';
+                inp.value = plate;
+                inp.dispatchEvent(new Event('input', {bubbles: true}));
+                inp.dispatchEvent(new Event('change', {bubbles: true}));
+                plakaDone = true;
+                continue;
+            }
+            
+            // TCKN
+            if (!tcknDone && (placeholder.includes('tc') || name.includes('tc') || label.includes('tc') || 
+                              placeholder.includes('kimlik') || name.includes('kimlik') || label.includes('kimlik'))) {
+                inp.focus();
+                inp.value = '';
+                inp.value = tckn;
+                inp.dispatchEvent(new Event('input', {bubbles: true}));
+                inp.dispatchEvent(new Event('change', {bubbles: true}));
+                tcknDone = true;
+                continue;
+            }
+        }
+        
+        return {
+            plaka: plakaDone,
+            tckn: tcknDone
+        };
+        """
+        
         try:
-            inputs = driver.find_elements(By.TAG_NAME, 'input')
-            for inp in inputs:
-                if inp.is_displayed() and not inp.get_attribute('disabled'):
-                    placeholder = inp.get_attribute('placeholder') or ''
-                    name = inp.get_attribute('name') or ''
-                    if 'plak' in placeholder.lower() or 'plak' in name.lower():
-                        inp.clear()
-                        inp.send_keys(plate)
-                        print(f"[INFO] Plaka dolduruldu", file=sys.stderr)
-                        plaka_filled = True
-                        break
+            result = driver.execute_script(js_fill_form, plate, tckn)
+            if result.get('plaka'):
+                print(f"[INFO] Plaka dolduruldu", file=sys.stderr)
+            else:
+                print(f"[WARNING] Plaka input bulunamadı", file=sys.stderr)
+            
+            if result.get('tckn'):
+                print(f"[INFO] TCKN dolduruldu", file=sys.stderr)
+            else:
+                print(f"[WARNING] TCKN input bulunamadı", file=sys.stderr)
         except Exception as e:
-            print(f"[WARNING] Plaka doldurma hatası: {e}", file=sys.stderr)
+            print(f"[WARNING] Form doldurma hatası: {str(e)[:100]}", file=sys.stderr)
         
-        # TCKN input
-        tckn_filled = False
-        try:
-            inputs = driver.find_elements(By.TAG_NAME, 'input')
-            for inp in inputs:
-                if inp.is_displayed() and not inp.get_attribute('disabled'):
-                    placeholder = inp.get_attribute('placeholder') or ''
-                    name = inp.get_attribute('name') or ''
-                    if 'tc' in placeholder.lower() or 'tc' in name.lower() or 'kimlik' in placeholder.lower():
-                        inp.clear()
-                        inp.send_keys(tckn)
-                        print(f"[INFO] TCKN dolduruldu", file=sys.stderr)
-                        tckn_filled = True
-                        break
-        except Exception as e:
-            print(f"[WARNING] TCKN doldurma hatası: {e}", file=sys.stderr)
+        time.sleep(2)
         
-        time.sleep(1)
-        
-        # Submit button
+        # Submit button (JavaScript ile robust)
         print(f"[INFO] Submit butonu aranıyor...", file=sys.stderr)
+        
+        js_click_submit = """
+        const keywords = ['teklif', 'sorgula', 'hesapla', 'devam'];
+        const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
+        const visibleButtons = buttons.filter(btn => btn.offsetParent !== null);
+        
+        for (const btn of visibleButtons) {
+            const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
+            
+            if (keywords.some(kw => btnText.includes(kw))) {
+                btn.scrollIntoView({block: 'center', behavior: 'smooth'});
+                
+                // Wait for scroll
+                setTimeout(() => {}, 300);
+                
+                btn.click();
+                
+                return {
+                    success: true,
+                    text: btnText.substring(0, 50)
+                };
+            }
+        }
+        
+        return {success: false};
+        """
+        
         submit_clicked = False
         try:
-            buttons = driver.find_elements(By.TAG_NAME, 'button')
-            for btn in buttons:
-                if btn.is_displayed() and not btn.get_attribute('disabled'):
-                    btn_text = btn.text.lower()
-                    if 'teklif' in btn_text or 'sorgula' in btn_text or 'hesapla' in btn_text or 'devam' in btn_text:
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                        time.sleep(0.5)
-                        driver.execute_script("arguments[0].click();", btn)
-                        print(f"[INFO] Submit button tıklandı: {btn_text[:30]}", file=sys.stderr)
-                        submit_clicked = True
-                        break
+            result = driver.execute_script(js_click_submit)
+            if result.get('success'):
+                print(f"[INFO] Submit button tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
+                submit_clicked = True
+            else:
+                print(f"[WARNING] Submit butonu bulunamadı", file=sys.stderr)
         except Exception as e:
-            print(f"[WARNING] Submit button hatası: {e}", file=sys.stderr)
+            print(f"[WARNING] Submit button hatası: {str(e)[:100]}", file=sys.stderr)
         
         if not submit_clicked:
+            # Screenshot al
+            driver.save_screenshot("debug_submit_not_found.png")
+            print(f"[DEBUG] Screenshot: debug_submit_not_found.png", file=sys.stderr)
             print(json.dumps({"error": "Submit butonu bulunamadı"}), file=sys.stderr)
             sys.exit(1)
         
