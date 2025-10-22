@@ -189,31 +189,86 @@ def main():
         # Wait for dashboard to fully load
         time.sleep(3)
         
-        # YENİ İŞ TEKLİFİ butonu (popup açmak için)
+        # YAKLAŞIM 1: Dashboard'da direkt trafik/kasko linklerini ara (Playwright gibi)
+        print(f"[INFO] Dashboard'da direkt ürün linkleri aranıyor...", file=sys.stderr)
+        
+        product_link_clicked = False
+        product_keywords_for_link = {
+            'trafik': ['trafik', 'zorunlu trafik'],
+            'kasko': ['kasko', 'tam kasko']
+        }
+        keywords_link = product_keywords_for_link.get(product_type.lower(), ['trafik'])
+        
         try:
-            new_offer_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, '//button[contains(., "YENİ İŞ TEKLİFİ")]'))
-            )
-            driver.execute_script("arguments[0].click();", new_offer_btn)
-            print(f"[INFO] Yeni İş Teklifi butonu tıklandı", file=sys.stderr)
+            js_find_product_link = """
+            const keywords = arguments[0];
             
-            # Popup'ın açılmasını bekle (modal/dialog/overlay)
-            print(f"[INFO] Popup yükleniyor...", file=sys.stderr)
-            time.sleep(3)
+            // Link, button, card elementlerini ara
+            const elements = Array.from(document.querySelectorAll('a, button, [role="button"], .card, .product-card'));
             
-            # Popup açıldı mı kontrol et
-            popup_opened = driver.execute_script("""
-                const popup = document.querySelector('.p-dialog, .modal, .p-overlay, [role="dialog"]');
-                return popup && popup.offsetParent !== null;
-            """)
+            for (const el of elements) {
+                const text = (el.textContent || el.innerText || '').toLowerCase();
+                
+                // Keyword match
+                const hasKeyword = keywords.some(kw => text.includes(kw));
+                
+                if (hasKeyword && el.offsetParent !== null && !el.disabled) {
+                    // "Yenileme" veya "Bilgilendirme" içermemeli (yanlış link)
+                    if (!text.includes('yenileme') && !text.includes('bilgilendirme') && text.length < 100) {
+                        el.scrollIntoView({block: 'center'});
+                        el.click();
+                        
+                        return {
+                            success: true,
+                            text: text.substring(0, 80),
+                            tag: el.tagName
+                        };
+                    }
+                }
+            }
             
-            if popup_opened:
-                print(f"[INFO] Popup açıldı", file=sys.stderr)
+            return {success: false};
+            """
+            
+            result = driver.execute_script(js_find_product_link, keywords_link)
+            
+            if result.get('success'):
+                print(f"[INFO] Ürün linki tıklandı: {result.get('text', 'unknown')} ({result.get('tag', 'unknown')})", file=sys.stderr)
+                product_link_clicked = True
+                time.sleep(3)  # Sayfa yüklensin
             else:
-                print(f"[WARNING] Popup açılmamış olabilir", file=sys.stderr)
+                print(f"[INFO] Dashboard'da direkt ürün linki bulunamadı", file=sys.stderr)
                 
         except Exception as e:
-            print(f"[WARNING] Yeni İş Teklifi butonu hatası: {str(e)[:100]}", file=sys.stderr)
+            print(f"[WARNING] Ürün linki arama hatası: {str(e)[:100]}", file=sys.stderr)
+        
+        # YAKLAŞIM 2: Eğer link bulunamadıysa, "YENİ İŞ TEKLİFİ" butonuna tıkla (popup açmak için)
+        if not product_link_clicked:
+            print(f"[INFO] Alternatif: YENİ İŞ TEKLİFİ butonu deneniyor...", file=sys.stderr)
+            try:
+                new_offer_btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[contains(., "YENİ İŞ TEKLİFİ")]'))
+                )
+                driver.execute_script("arguments[0].click();", new_offer_btn)
+                print(f"[INFO] Yeni İş Teklifi butonu tıklandı", file=sys.stderr)
+                
+                # Popup'ın açılmasını bekle (modal/dialog/overlay)
+                print(f"[INFO] Popup yükleniyor...", file=sys.stderr)
+                time.sleep(3)
+                
+                # Popup açıldı mı kontrol et
+                popup_opened = driver.execute_script("""
+                    const popup = document.querySelector('.p-dialog, .modal, .p-overlay, [role="dialog"]');
+                    return popup && popup.offsetParent !== null;
+                """)
+                
+                if popup_opened:
+                    print(f"[INFO] Popup açıldı", file=sys.stderr)
+                else:
+                    print(f"[WARNING] Popup açılmamış olabilir", file=sys.stderr)
+                    
+            except Exception as e:
+                print(f"[WARNING] Yeni İş Teklifi butonu hatası: {str(e)[:100]}", file=sys.stderr)
         
         # QR popup ve diğer popup'ları agresif kapat
         print(f"[INFO] Popup'lar kontrol ediliyor...", file=sys.stderr)
