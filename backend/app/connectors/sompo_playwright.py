@@ -506,36 +506,69 @@ async def main():
             print(f"[DEBUG] Form URL: {page.url}", file=sys.stderr)
             
             # Trafik/Kasko checkbox'ını seç
-            if product_type.lower() == "trafik":
-                print(f"[INFO] Trafik checkbox'ı seçiliyor...", file=sys.stderr)
-                
-                js_select_trafik = """
-                    (() => {
-                        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            print(f"[INFO] {product_type.capitalize()} checkbox'ı seçiliyor...", file=sys.stderr)
+            
+            js_select_checkbox = f"""
+                (() => {{
+                    const productType = '{product_type}';  // "trafik" veya "kasko"
+                    const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                    
+                    let trafikCb = null;
+                    let kaskoCb = null;
+                    
+                    // Trafik ve Kasko checkbox'larını bul
+                    for (const cb of checkboxes) {{
+                        const label = cb.labels && cb.labels[0] ? cb.labels[0].textContent : '';
+                        const nextText = cb.nextSibling ? cb.nextSibling.textContent : '';
+                        const text = (label + nextText).toLowerCase();
                         
-                        for (const cb of checkboxes) {
-                            const label = cb.labels && cb.labels[0] ? cb.labels[0].textContent.toLowerCase() : '';
-                            const name = (cb.name || '').toLowerCase();
-                            const id = (cb.id || '').toLowerCase();
-                            
-                            if (label.includes('trafik') || name.includes('trafik') || id.includes('trafik')) {
-                                if (!cb.checked) {
-                                    cb.click();
-                                    return {success: true, checkbox: 'Trafik'};
-                                }
-                            }
-                        }
-                        
-                        return {success: false};
-                    })()
-                """
-                
-                try:
-                    result = await page.evaluate(js_select_trafik)
-                    if result.get('success'):
-                        print(f"[INFO] {result['checkbox']} checkbox seçildi ✅", file=sys.stderr)
-                except Exception as e:
-                    print(f"[WARNING] Checkbox seçimi hatası: {str(e)[:50]}", file=sys.stderr)
+                        if (text.includes('trafik') && !text.includes('kasko')) {{
+                            trafikCb = cb;
+                        }} else if (text.includes('kasko')) {{
+                            kaskoCb = cb;
+                        }}
+                    }}
+                    
+                    // Doğru checkbox'ı seç
+                    if (productType === 'trafik') {{
+                        // Kasko'yu kaldır, Trafik'i seç
+                        if (kaskoCb && kaskoCb.checked) {{
+                            kaskoCb.click();
+                        }}
+                        if (trafikCb && !trafikCb.checked) {{
+                            trafikCb.click();
+                            return {{success: true, selected: 'Trafik', deselected: 'Kasko'}};
+                        }}
+                        return {{success: trafikCb !== null, selected: 'Trafik'}};
+                    }} else if (productType === 'kasko') {{
+                        // Trafik'i kaldır, Kasko'yu seç
+                        if (trafikCb && trafikCb.checked) {{
+                            trafikCb.click();
+                        }}
+                        if (kaskoCb && !kaskoCb.checked) {{
+                            kaskoCb.click();
+                            return {{success: true, selected: 'Kasko', deselected: 'Trafik'}};
+                        }}
+                        return {{success: kaskoCb !== null, selected: 'Kasko'}};
+                    }}
+                    
+                    return {{success: false}};
+                }})()
+            """
+            
+            try:
+                result = await page.evaluate(js_select_checkbox)
+                if result.get('success'):
+                    msg = f"{result.get('selected', product_type.capitalize())} seçildi"
+                    if result.get('deselected'):
+                        msg += f" ({result['deselected']} kaldırıldı)"
+                    print(f"[INFO] {msg} ✅", file=sys.stderr)
+                else:
+                    print(f"[WARNING] {product_type.capitalize()} checkbox bulunamadı ❌", file=sys.stderr)
+            except Exception as e:
+                print(f"[WARNING] Checkbox seçimi hatası: {str(e)[:50]}", file=sys.stderr)
+            
+            await page.wait_for_timeout(500)
             
             # Araç Plakası doldur
             print(f"[INFO] Araç Plakası dolduruluyor: {plate}", file=sys.stderr)
@@ -543,25 +576,58 @@ async def main():
             js_fill_plate = f"""
                 (() => {{
                     const plate = '{plate}';
-                    const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"])'));
+                    
+                    // Tüm text input'ları bul
+                    const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
                     
                     for (const inp of inputs) {{
+                        // Input'un etrafındaki text'leri kontrol et
                         const placeholder = (inp.placeholder || '').toLowerCase();
                         const name = (inp.name || '').toLowerCase();
-                        const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
-                        const prevLabel = inp.previousElementSibling ? inp.previousElementSibling.textContent.toLowerCase() : '';
+                        const id = (inp.id || '').toLowerCase();
                         
-                        if (placeholder.includes('plak') || name.includes('plak') || 
-                            label.includes('plak') || label.includes('araç') || 
-                            prevLabel.includes('plak') || prevLabel.includes('araç')) {{
+                        // Label kontrolü (multiple yöntem)
+                        let labelText = '';
+                        
+                        // 1. labels property
+                        if (inp.labels && inp.labels[0]) {{
+                            labelText = inp.labels[0].textContent.toLowerCase();
+                        }}
+                        
+                        // 2. previousElementSibling (Araç Plakası: gibi)
+                        let prev = inp.previousElementSibling;
+                        while (prev && !labelText) {{
+                            const text = (prev.textContent || '').toLowerCase();
+                            if (text.includes('araç') || text.includes('plak')) {{
+                                labelText = text;
+                                break;
+                            }}
+                            prev = prev.previousElementSibling;
+                        }}
+                        
+                        // 3. Parent element içindeki text
+                        if (!labelText && inp.parentElement) {{
+                            const parentText = (inp.parentElement.textContent || '').toLowerCase();
+                            if (parentText.includes('araç plaka')) {{
+                                labelText = parentText;
+                            }}
+                        }}
+                        
+                        // Araç Plakası mı?
+                        if (placeholder.includes('plak') || name.includes('plak') || id.includes('plak') ||
+                            labelText.includes('araç') && labelText.includes('plak')) {{
                             
-                            inp.focus();
-                            inp.value = plate;
-                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
-                            
-                            return {{success: true, field: 'Araç Plakası'}};
+                            // Görünür mü?
+                            if (inp.offsetParent !== null && !inp.disabled) {{
+                                inp.scrollIntoView({{block: 'center'}});
+                                inp.focus();
+                                inp.value = plate;
+                                inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                                inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                                inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                                
+                                return {{success: true, field: 'Araç Plakası', method: 'found'}};
+                            }}
                         }}
                     }}
                     
@@ -574,7 +640,7 @@ async def main():
                 if result.get('success'):
                     print(f"[INFO] {result['field']} dolduruldu ✅", file=sys.stderr)
                 else:
-                    print(f"[WARNING] Plaka input bulunamadı ❌", file=sys.stderr)
+                    print(f"[WARNING] Araç Plakası input bulunamadı ❌", file=sys.stderr)
             except Exception as e:
                 print(f"[ERROR] Plaka doldurma hatası: {str(e)[:100]}", file=sys.stderr)
             
@@ -585,17 +651,26 @@ async def main():
             
             js_submit = """
                 (() => {
-                    const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
+                    // Tüm button ve input[type="button"] elementlerini ara
+                    const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a[role="button"]'));
                     
                     for (const btn of buttons) {
-                        const text = (btn.textContent || '').trim();
+                        const text = (btn.textContent || btn.value || '').trim();
                         
                         if (text.includes('Teklif Oluştur') || text.includes('TEKLİF OLUŞTUR') ||
-                            text.includes('Teklif Al') || text.includes('Sorgula')) {
+                            text.includes('Teklif Al') || text.includes('TEKLİF AL') ||
+                            text.includes('Sorgula') || text.includes('SORGULA')) {
                             
-                            if (btn.offsetParent !== null) {
+                            // Görünür mü?
+                            if (btn.offsetParent !== null && !btn.disabled) {
                                 btn.scrollIntoView({block: 'center'});
-                                btn.click();
+                                
+                                // Sayfanın en altına scroll (buton aşağıda olabilir)
+                                window.scrollTo(0, document.body.scrollHeight);
+                                
+                                setTimeout(() => {
+                                    btn.click();
+                                }, 200);
                                 
                                 return {
                                     success: true,
@@ -611,10 +686,25 @@ async def main():
             
             try:
                 submit_result = await page.evaluate(js_submit)
+                await page.wait_for_timeout(300)  # setTimeout için bekle
+                
                 if submit_result.get('success'):
-                    print(f"[INFO] Submit butonu tıklandı: {submit_result.get('text', 'Teklif Oluştur')}", file=sys.stderr)
+                    print(f"[INFO] '{submit_result.get('text', 'Teklif Oluştur')}' tıklandı ✅", file=sys.stderr)
                 else:
                     print(f"[WARNING] 'Teklif Oluştur' butonu bulunamadı ❌", file=sys.stderr)
+                    # Debug: Tüm butonları logla
+                    all_buttons = await page.evaluate("""
+                        (() => {
+                            const btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+                            return btns.filter(b => b.offsetParent !== null).map(b => ({
+                                text: (b.textContent || b.value || '').trim().substring(0, 50),
+                                type: b.type || b.tagName
+                            }));
+                        })()
+                    """)
+                    print(f"[DEBUG] Görünen button'lar ({len(all_buttons)}):", file=sys.stderr)
+                    for i, btn in enumerate(all_buttons[:10]):
+                        print(f"  {i+1}. {btn['type']}: '{btn['text']}'", file=sys.stderr)
             except Exception as e:
                 print(f"[ERROR] Submit hatası: {str(e)[:100]}", file=sys.stderr)
             
