@@ -251,6 +251,39 @@ pub async fn fetch_sompo_quote(
         }
     }
     
+    // Ürün seçildiyse, modal kapanana kadar bekle
+    if product_selected {
+        tracing::info!("⏳ Modal kapanması bekleniyor...");
+        
+        for i in 0..20 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            let js_check_modal_closed = r#"
+                const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content');
+                const visibleModals = Array.from(modals).filter(m => {
+                    const style = window.getComputedStyle(m);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                });
+                return visibleModals.length === 0;
+            "#;
+            
+            if let Ok(result) = client.execute(js_check_modal_closed, vec![]).await {
+                if result.as_bool().unwrap_or(false) {
+                    tracing::info!("✅ Modal kapandı! ({}.5 saniye sonra)", i / 2);
+                    break;
+                }
+            }
+            
+            if i == 19 {
+                tracing::warn!("⚠️ Modal kapanma timeout! 10 saniye beklendi.");
+            }
+        }
+        
+        // Sayfa yüklensin diye ek bekle
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        tracing::info!("✅ Sayfa hazır, form doldurmaya başlanıyor");
+    }
+    
     // JavaScript başarısızsa CSS selectors dene
     if !product_selected {
         tracing::info!("🔍 CSS selectors ile {} ürünü aranıyor...", product_type);
