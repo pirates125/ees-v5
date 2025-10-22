@@ -40,7 +40,11 @@ export default function TekliflerPage() {
       try {
         setIsLoading(true);
         const data = await apiClient.getQuotes();
-        setQuotes(data as any[]);
+        // Backend {quotes: [], total: 0} formatında dönüyor
+        const quotesArray = Array.isArray(data)
+          ? data
+          : (data as any)?.quotes || [];
+        setQuotes(quotesArray);
       } catch (error) {
         console.error("Teklifler yüklenemedi:", error);
         toast.error("Teklifler yüklenirken bir hata oluştu");
