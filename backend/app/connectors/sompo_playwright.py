@@ -72,26 +72,59 @@ async def main():
             # Form bekle
             await page.wait_for_selector('form', timeout=15000)
             
-            # Username
-            await page.fill('input[type="text"], input[name="username"]', username)
-            print(f"[INFO] Username girildi", file=sys.stderr)
+            # Username - input validation
+            username_input = await page.query_selector('input[type="text"], input[name="username"]')
+            if username_input:
+                await username_input.clear()
+                await username_input.fill(username)
+                
+                # Validation
+                input_value = await username_input.input_value()
+                if input_value == username:
+                    print(f"[INFO] Username girildi: {username}", file=sys.stderr)
+                else:
+                    print(f"[WARNING] Username validation failed! Expected: {username}, Got: {input_value}", file=sys.stderr)
+            else:
+                print(f"[ERROR] Username input bulunamadı", file=sys.stderr)
+                await page.screenshot(path="debug_no_username.png")
+                sys.exit(1)
             
-            # Password
-            await page.fill('input[type="password"]', password)
-            print(f"[INFO] Password girildi", file=sys.stderr)
+            # Password - input validation
+            password_input = await page.query_selector('input[type="password"]')
+            if password_input:
+                await password_input.clear()
+                await password_input.fill(password)
+                
+                # Validation (length check)
+                input_value = await password_input.input_value()
+                if len(input_value) == len(password):
+                    print(f"[INFO] Password girildi (len={len(password)})", file=sys.stderr)
+                else:
+                    print(f"[WARNING] Password validation failed! Expected len: {len(password)}, Got: {len(input_value)}", file=sys.stderr)
+            else:
+                print(f"[ERROR] Password input bulunamadı", file=sys.stderr)
+                await page.screenshot(path="debug_no_password.png")
+                sys.exit(1)
             
             # Login button
             await page.click('button[type="submit"]')
             print(f"[INFO] Login button tıklandı", file=sys.stderr)
             
-            # URL değişimini bekle
-            await page.wait_for_load_state("networkidle", timeout=15000)
+            # URL değişimini bekle - daha esnek
+            await page.wait_for_timeout(3000)  # 3 saniye bekle
             
             current_url = page.url
             print(f"[INFO] URL after login: {current_url}", file=sys.stderr)
             
+            # Sayfa içeriğinde hata var mı?
+            page_content = await page.content()
+            if "hata" in page_content.lower() or "error" in page_content.lower():
+                # Screenshot al
+                await page.screenshot(path="debug_login_error.png")
+                print(f"[WARNING] Login sayfasında hata mesajı olabilir", file=sys.stderr)
+            
             # OTP ekranı?
-            if "authenticator" in current_url or "google-authenticator" in current_url:
+            if "authenticator" in current_url or "google-authenticator" in current_url or "otp" in current_url.lower():
                 print(f"[INFO] OTP ekranı tespit edildi", file=sys.stderr)
                 
                 if not secret_key:
@@ -117,10 +150,28 @@ async def main():
                 else:
                     print(f"[ERROR] OTP input bulunamadı", file=sys.stderr)
                     sys.exit(1)
+            elif "login" in current_url:
+                # Hala login sayfasındaysa - credentials veya bot detection
+                await page.screenshot(path="debug_still_login.png")
+                print(f"[ERROR] Hala login sayfasında - credentials yanlış veya bot detection", file=sys.stderr)
+                print(f"[DEBUG] Screenshot: debug_still_login.png", file=sys.stderr)
+                print(json.dumps({"error": "Login başarısız - credentials kontrol edin"}), file=sys.stderr)
+                sys.exit(1)
             
-            # Dashboard kontrolü
-            await page.wait_for_url(lambda url: "dashboard" in url and "login" not in url, timeout=10000)
-            print(f"[INFO] Dashboard'a ulaşıldı: {page.url}", file=sys.stderr)
+            # Dashboard kontrolü - daha esnek
+            try:
+                await page.wait_for_url(lambda url: "dashboard" in url and "login" not in url, timeout=15000)
+                print(f"[INFO] Dashboard'a ulaşıldı: {page.url}", file=sys.stderr)
+            except:
+                # Timeout ama dashboard'da olabiliriz
+                current_url = page.url
+                if "dashboard" in current_url and "login" not in current_url:
+                    print(f"[INFO] Dashboard'a ulaşıldı (timeout ama URL doğru): {current_url}", file=sys.stderr)
+                else:
+                    await page.screenshot(path="debug_dashboard_timeout.png")
+                    print(f"[ERROR] Dashboard'a ulaşılamadı: {current_url}", file=sys.stderr)
+                    print(json.dumps({"error": f"Dashboard timeout: {current_url}"}), file=sys.stderr)
+                    sys.exit(1)
             
             # ==================== QUOTE ====================
             
