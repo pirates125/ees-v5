@@ -45,27 +45,97 @@ pub async fn fetch_sompo_quote(
     
     tracing::info!("🚗 Ürün türü: {}", product_type);
     
-    // Ürün sayfasına git
-    let product_selectors = match product_type {
-        "trafik" => SompoSelectors::TRAFIK_LINKS,
-        "kasko" => SompoSelectors::KASKO_LINKS,
-        _ => SompoSelectors::TRAFIK_LINKS,
-    };
+    // Önce "YENİ İŞ TEKLİFİ" butonuna tıkla (dashboard'dayız)
+    tracing::info!("🔍 'YENİ İŞ TEKLİFİ' butonu aranıyor...");
+    let js_click_new_quote = r#"
+        const buttons = Array.from(document.querySelectorAll('button'));
+        for (const btn of buttons) {
+            const text = (btn.innerText || '').toUpperCase();
+            if (text.includes('YENİ') && text.includes('İŞ') && text.includes('TEKLİF')) {
+                btn.click();
+                return { found: true, text: btn.innerText };
+            }
+        }
+        return { found: false };
+    "#;
     
-    let mut product_page_found = false;
-    for selector in product_selectors {
-        if let Ok(elem) = client.find(Locator::Css(selector)).await {
-            if let Ok(_) = elem.click().await {
-                tracing::info!("✅ Ürün sayfasına gidildi: {}", selector);
-                product_page_found = true;
-                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-                break;
+    let mut new_quote_clicked = false;
+    match client.execute(js_click_new_quote, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 YENİ İŞ TEKLİFİ button search: {:?}", result);
+            if let Some(obj) = result.as_object() {
+                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    tracing::info!("✅ YENİ İŞ TEKLİFİ butonuna tıklandı");
+                    new_quote_clicked = true;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ YENİ İŞ TEKLİFİ butonu JavaScript hatası: {}", e);
+        }
+    }
+    
+    if !new_quote_clicked {
+        tracing::warn!("⚠️ YENİ İŞ TEKLİFİ butonu bulunamadı, direkt ürün seçimine geçiliyor");
+    }
+    
+    // Ürün sayfasına git (Trafik/Kasko seçimi)
+    tracing::info!("🔍 {} ürünü seçiliyor...", product_type);
+    
+    // JavaScript ile ürün seçimi - daha güvenilir
+    let js_select_product = format!(r#"
+        const buttons = Array.from(document.querySelectorAll('button, a, .product-card, .product-item'));
+        for (const btn of buttons) {{
+            const text = (btn.innerText || btn.textContent || '').toLowerCase();
+            if (text.includes('{}')) {{
+                btn.click();
+                return {{ found: true, text: btn.innerText || btn.textContent }};
+            }}
+        }}
+        return {{ found: false }};
+    "#, product_type);
+    
+    let mut product_selected = false;
+    match client.execute(&js_select_product, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 {} ürün seçimi: {:?}", product_type, result);
+            if let Some(obj) = result.as_object() {
+                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    tracing::info!("✅ {} ürünü seçildi", product_type);
+                    product_selected = true;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ {} ürün seçimi hatası: {}", product_type, e);
+        }
+    }
+    
+    // JavaScript başarısızsa CSS selectors dene
+    if !product_selected {
+        tracing::info!("🔍 CSS selectors ile {} ürünü aranıyor...", product_type);
+        let product_selectors = match product_type {
+            "trafik" => SompoSelectors::TRAFIK_LINKS,
+            "kasko" => SompoSelectors::KASKO_LINKS,
+            _ => SompoSelectors::TRAFIK_LINKS,
+        };
+        
+        for selector in product_selectors {
+            if let Ok(elem) = client.find(Locator::Css(selector)).await {
+                if let Ok(_) = elem.click().await {
+                    tracing::info!("✅ Ürün sayfasına gidildi: {}", selector);
+                    product_selected = true;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                    break;
+                }
             }
         }
     }
     
-    if !product_page_found {
-        tracing::warn!("⚠️ Ürün sayfası linki bulunamadı, mevcut sayfada devam ediliyor");
+    if !product_selected {
+        tracing::warn!("⚠️ Ürün seçimi başarısız, mevcut sayfada devam ediliyor");
     }
     
     // Form doldurma - Plaka
