@@ -1,4 +1,6 @@
-# Python Dependencies - Sompo Session
+# Python Dependencies - Sompo Scraper
 pyotp==2.9.0
+playwright==1.40.0
+# Selenium (fallback)
 selenium==4.16.0
 undetected-chromedriver==3.5.5

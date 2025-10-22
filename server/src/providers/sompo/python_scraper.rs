@@ -16,8 +16,8 @@ pub async fn fetch_sompo_quote_python(
         .unwrap()
         .as_millis() as u64;
     
-    // Python script path
-    let script_path = "backend/app/connectors/sompo_full.py";
+    // Python Playwright script path (çalışan versiyon!)
+    let script_path = "backend/app/connectors/sompo_playwright.py";
     
     // Request data (JSON)
     let product_type_str = match request.coverage.product_type {
