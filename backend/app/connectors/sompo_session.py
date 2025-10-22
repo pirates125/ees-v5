@@ -65,20 +65,22 @@ def main():
         
         print(f"[INFO] Login button tıklandı", file=sys.stderr)
         
+        # URL değişimini bekle (CRITICAL: login sayfasından çık!)
+        login_url = "https://ejento.somposigorta.com.tr/dashboard/login"
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: d.current_url != login_url
+            )
+            print(f"[INFO] URL değişti, yeni sayfa yükleniyor...", file=sys.stderr)
+        except:
+            print(f"[WARNING] URL 15 saniyede değişmedi - login başarısız olabilir", file=sys.stderr)
+        
+        # Network idle bekle
+        time.sleep(2)
+        
         # Screenshot al (debug)
         driver.save_screenshot("debug_after_login.png")
         print(f"[DEBUG] Screenshot kaydedildi: debug_after_login.png", file=sys.stderr)
-        
-        # Wait for URL change (login sayfasından çık)
-        time.sleep(3)
-        
-        # URL bekle
-        try:
-            WebDriverWait(driver, 10).until(
-                lambda d: d.current_url != "https://ejento.somposigorta.com.tr/dashboard/login"
-            )
-        except:
-            print(f"[WARNING] URL değişmedi - login başarısız olabilir", file=sys.stderr)
         
         current_url = driver.current_url
         print(f"[INFO] Current URL after login: {current_url}", file=sys.stderr)
