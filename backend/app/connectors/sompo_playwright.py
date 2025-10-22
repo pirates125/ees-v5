@@ -497,13 +497,61 @@ async def main():
             except:
                 print(f"[WARNING] URL timeout, current: {page.url}", file=sys.stderr)
             
-            await page.wait_for_load_state("networkidle", timeout=10000)
-            await page.wait_for_timeout(1000)
+            # Network idle + loading spinner bekleme
+            print(f"[INFO] Form yükleniyor...", file=sys.stderr)
+            await page.wait_for_load_state("networkidle", timeout=15000)
+            
+            # Loading spinner bitmesini bekle
+            print(f"[INFO] Loading spinner bekleniyor...", file=sys.stderr)
+            try:
+                # Loading, spinner, overlay gibi elementlerin kaybolmasını bekle
+                await page.wait_for_function("""
+                    () => {
+                        const loadingElements = document.querySelectorAll('.loading, .spinner, .overlay, [class*="loading"], [class*="spinner"]');
+                        return Array.from(loadingElements).every(el => el.offsetParent === null || window.getComputedStyle(el).display === 'none');
+                    }
+                """, timeout=10000)
+                print(f"[INFO] Loading tamamlandı ✅", file=sys.stderr)
+            except:
+                print(f"[WARNING] Loading timeout (devam ediliyor)", file=sys.stderr)
+            
+            # Ekstra bekleme - form elementleri render olsun
+            await page.wait_for_timeout(2000)  # 1s -> 2s
             
             # Form screenshot
             await page.screenshot(path="debug_form_page.png", full_page=True)
             print(f"[DEBUG] Form sayfası screenshot: debug_form_page.png", file=sys.stderr)
             print(f"[DEBUG] Form URL: {page.url}", file=sys.stderr)
+            
+            # Checkbox'ların yüklenmesini bekle
+            print(f"[INFO] Form elementleri bekleniyor...", file=sys.stderr)
+            try:
+                # Checkbox'ların DOM'a yüklenmesini bekle
+                await page.wait_for_selector('input[type="checkbox"]', timeout=5000)
+                print(f"[INFO] Checkbox'lar yüklendi ✅", file=sys.stderr)
+            except:
+                print(f"[WARNING] Checkbox timeout (devam ediliyor)", file=sys.stderr)
+            
+            await page.wait_for_timeout(500)
+            
+            # Debug: Tüm checkbox'ları logla
+            try:
+                all_checkboxes = await page.evaluate("""
+                    (() => {
+                        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                        return checkboxes.map(cb => ({
+                            checked: cb.checked,
+                            label: cb.labels && cb.labels[0] ? cb.labels[0].textContent.trim() : '',
+                            nextText: cb.nextSibling ? cb.nextSibling.textContent.trim() : '',
+                            visible: cb.offsetParent !== null
+                        }));
+                    })()
+                """)
+                print(f"[DEBUG] Checkbox'lar ({len(all_checkboxes)}):", file=sys.stderr)
+                for i, cb in enumerate(all_checkboxes):
+                    print(f"  {i+1}. {'☑' if cb['checked'] else '☐'} {cb['label'] or cb['nextText']} (visible: {cb['visible']})", file=sys.stderr)
+            except:
+                pass
             
             # Trafik/Kasko checkbox'ını seç
             print(f"[INFO] {product_type.capitalize()} checkbox'ı seçiliyor...", file=sys.stderr)
@@ -568,7 +616,35 @@ async def main():
             except Exception as e:
                 print(f"[WARNING] Checkbox seçimi hatası: {str(e)[:50]}", file=sys.stderr)
             
+            # Text input'ların yüklenmesini bekle
+            try:
+                await page.wait_for_selector('input[type="text"], input:not([type])', timeout=5000)
+                print(f"[INFO] Text input'lar yüklendi ✅", file=sys.stderr)
+            except:
+                print(f"[WARNING] Text input timeout (devam ediliyor)", file=sys.stderr)
+            
             await page.wait_for_timeout(500)
+            
+            # Debug: Tüm text input'ları logla
+            try:
+                all_inputs = await page.evaluate("""
+                    (() => {
+                        const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                        return inputs.map(inp => ({
+                            placeholder: inp.placeholder || '',
+                            name: inp.name || '',
+                            value: inp.value || '',
+                            visible: inp.offsetParent !== null,
+                            disabled: inp.disabled
+                        }));
+                    })()
+                """)
+                print(f"[DEBUG] Text input'lar ({len(all_inputs)}):", file=sys.stderr)
+                for i, inp in enumerate(all_inputs[:10]):
+                    status = "✓" if inp['visible'] and not inp['disabled'] else "✗"
+                    print(f"  {i+1}. {status} name={inp['name']}, placeholder={inp['placeholder']}, value={inp['value'][:20]}", file=sys.stderr)
+            except:
+                pass
             
             # Araç Plakası doldur
             print(f"[INFO] Araç Plakası dolduruluyor: {plate}", file=sys.stderr)
@@ -639,6 +715,27 @@ async def main():
                 result = await page.evaluate(js_fill_plate)
                 if result.get('success'):
                     print(f"[INFO] {result['field']} dolduruldu ✅", file=sys.stderr)
+                    
+                    # Validation: Value gerçekten set edildi mi?
+                    await page.wait_for_timeout(300)
+                    plate_value = await page.evaluate(f"""
+                        (() => {{
+                            const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                            for (const inp of inputs) {{
+                                const placeholder = (inp.placeholder || '').toLowerCase();
+                                const name = (inp.name || '').toLowerCase();
+                                if (placeholder.includes('plak') || name.includes('plak')) {{
+                                    return inp.value;
+                                }}
+                            }}
+                            return '';
+                        }})()
+                    """)
+                    
+                    if plate_value == plate:
+                        print(f"[INFO] Plaka validation OK: {plate_value} ✅", file=sys.stderr)
+                    else:
+                        print(f"[WARNING] Plaka validation FAILED: expected={plate}, got={plate_value} ❌", file=sys.stderr)
                 else:
                     print(f"[WARNING] Araç Plakası input bulunamadı ❌", file=sys.stderr)
             except Exception as e:
