@@ -48,8 +48,8 @@ impl Config {
             
             sompo_base_url: env::var("SOMPO_BASE_URL")
                 .unwrap_or_else(|_| "https://ejento.somposigorta.com.tr/dashboard/login".to_string()),
-            sompo_username: env::var("SOMPO_USERNAME").unwrap_or_default(),
-            sompo_password: env::var("SOMPO_PASSWORD").unwrap_or_default(),
+            sompo_username: env::var("SOMPO_USER").unwrap_or_default(),
+            sompo_password: env::var("SOMPO_PASS").unwrap_or_default(),
             sompo_secret_key: env::var("SOMPO_SECRET_KEY").unwrap_or_default(),
             
             webdriver_url: env::var("WEBDRIVER_URL")

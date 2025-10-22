@@ -43,46 +43,66 @@ pub async fn login_to_sompo(
     
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     
-    tracing::info!("✅ Sompo sayfası yüklendi");
+    let current_url = client.current_url().await
+        .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+    tracing::info!("✅ Sompo sayfası yüklendi: {}", current_url);
     
     // Önce spesifik XPath'i dene (Python'dan gelen)
     let mut username_filled = false;
+    tracing::info!("🔍 Username input aranıyor (XPath)...");
     if let Ok(elem) = client.find(Locator::XPath(SompoSelectors::USERNAME_XPATH)).await {
+        tracing::info!("✅ Username input bulundu (XPath)");
         if let Ok(_) = elem.send_keys(&config.sompo_username).await {
-            tracing::info!("✅ Username dolduruldu (XPath)");
+            tracing::info!("✅ Username dolduruldu (XPath): {}", mask_sensitive(&config.sompo_username));
             username_filled = true;
+        } else {
+            tracing::warn!("⚠️ Username gönderilemedi (XPath)");
         }
+    } else {
+        tracing::warn!("⚠️ Username input bulunamadı (XPath), CSS deneniyor...");
     }
     
     // Başarısız olduysa CSS selector'ları dene
     if !username_filled {
+        tracing::info!("🔍 Username input aranıyor (CSS selectors)...");
         username_filled = try_fill_input(client, SompoSelectors::USERNAME_INPUTS, &config.sompo_username).await?;
         if !username_filled {
+            tracing::error!("❌ Username input hiçbir selector ile bulunamadı!");
             return Err(ApiError::LoginFailed("Username input bulunamadı".to_string()));
         }
-        tracing::info!("✅ Username dolduruldu (CSS)");
+        tracing::info!("✅ Username dolduruldu (CSS): {}", mask_sensitive(&config.sompo_username));
     }
     
     // Password için aynı strateji
     let mut password_filled = false;
+    tracing::info!("🔍 Password input aranıyor (XPath)...");
     if let Ok(elem) = client.find(Locator::XPath(SompoSelectors::PASSWORD_XPATH)).await {
+        tracing::info!("✅ Password input bulundu (XPath)");
         if let Ok(_) = elem.send_keys(&config.sompo_password).await {
             tracing::info!("✅ Password dolduruldu (XPath)");
             password_filled = true;
+        } else {
+            tracing::warn!("⚠️ Password gönderilemedi (XPath)");
         }
+    } else {
+        tracing::warn!("⚠️ Password input bulunamadı (XPath), CSS deneniyor...");
     }
     
     if !password_filled {
+        tracing::info!("🔍 Password input aranıyor (CSS selectors)...");
         password_filled = try_fill_input(client, SompoSelectors::PASSWORD_INPUTS, &config.sompo_password).await?;
         if !password_filled {
+            tracing::error!("❌ Password input hiçbir selector ile bulunamadı!");
             return Err(ApiError::LoginFailed("Password input bulunamadı".to_string()));
         }
         tracing::info!("✅ Password dolduruldu (CSS)");
     }
     
     // Login butonuna tıkla
+    tracing::info!("🔍 Login butonu aranıyor...");
     let login_clicked = try_click_button(client, SompoSelectors::LOGIN_BUTTONS).await?;
     if !login_clicked {
+        tracing::error!("❌ Login butonu hiçbir selector ile bulunamadı!");
         return Err(ApiError::LoginFailed("Login butonu bulunamadı".to_string()));
     }
     tracing::info!("✅ Login butonu tıklandı");
@@ -126,13 +146,18 @@ pub async fn login_to_sompo(
 
 async fn try_fill_input(client: &Client, selectors: &[&str], value: &str) -> Result<bool, ApiError> {
     for selector in selectors {
+        tracing::debug!("  → Deneniyor: {}", selector);
         match client.find(Locator::Css(selector)).await {
             Ok(elem) => {
+                tracing::info!("  ✅ Element bulundu: {}", selector);
                 elem.send_keys(value).await
                     .map_err(|e| ApiError::WebDriverError(e.to_string()))?;
                 return Ok(true);
             }
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!("  ✗ Bulunamadı: {} ({})", selector, e);
+                continue;
+            },
         }
     }
     Ok(false)
@@ -140,13 +165,18 @@ async fn try_fill_input(client: &Client, selectors: &[&str], value: &str) -> Res
 
 async fn try_click_button(client: &Client, selectors: &[&str]) -> Result<bool, ApiError> {
     for selector in selectors {
+        tracing::debug!("  → Deneniyor: {}", selector);
         match client.find(Locator::Css(selector)).await {
             Ok(elem) => {
+                tracing::info!("  ✅ Buton bulundu: {}", selector);
                 elem.click().await
                     .map_err(|e| ApiError::WebDriverError(e.to_string()))?;
                 return Ok(true);
             }
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!("  ✗ Bulunamadı: {} ({})", selector, e);
+                continue;
+            },
         }
     }
     Ok(false)

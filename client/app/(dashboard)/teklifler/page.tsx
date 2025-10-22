@@ -56,21 +56,24 @@ export default function TekliflerPage() {
     loadQuotes();
   }, []);
 
-  const filteredQuotes = quotes.filter((quote) => {
-    if (
-      filter.search &&
-      !quote.plateNumber.toLowerCase().includes(filter.search.toLowerCase())
-    ) {
-      return false;
-    }
-    if (filter.provider !== "all" && quote.provider !== filter.provider) {
-      return false;
-    }
-    if (filter.status !== "all" && quote.status !== filter.status) {
-      return false;
-    }
-    return true;
-  });
+  const filteredQuotes = Array.isArray(quotes)
+    ? quotes.filter((quote) => {
+        if (
+          filter.search &&
+          quote.plateNumber &&
+          !quote.plateNumber.toLowerCase().includes(filter.search.toLowerCase())
+        ) {
+          return false;
+        }
+        if (filter.provider !== "all" && quote.provider !== filter.provider) {
+          return false;
+        }
+        if (filter.status !== "all" && quote.status !== filter.status) {
+          return false;
+        }
+        return true;
+      })
+    : [];
 
   return (
     <div className="container mx-auto p-6 space-y-6">
