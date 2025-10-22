@@ -12,12 +12,42 @@ pub async fn fetch_sompo_quote(
     config: Arc<Config>,
     request: QuoteRequest,
 ) -> Result<QuoteResponse, ApiError> {
+    // Retry logic - Python script gibi, başarısızsa 1 kez daha session temizleyerek dene
+    let mut attempts = 0;
+    loop {
+        match try_fetch_sompo_quote_internal(config.clone(), request.clone(), attempts).await {
+            Ok(result) => return Ok(result),
+            Err(e) if attempts < 1 => {
+                tracing::warn!("⚠️ Deneme {} başarısız: {}", attempts + 1, e);
+                tracing::info!("🔄 Session temizleniyor, tekrar deneniyor...");
+                
+                // Session temizle
+                let session_manager = SessionManager::new(&config.session_dir);
+                session_manager.clear_session("sompo").ok();
+                
+                attempts += 1;
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            }
+            Err(e) => {
+                tracing::error!("❌ Tüm denemeler başarısız oldu: {}", e);
+                return Err(e);
+            }
+        }
+    }
+}
+
+// Internal: Tek deneme
+async fn try_fetch_sompo_quote_internal(
+    config: Arc<Config>,
+    request: QuoteRequest,
+    attempt: usize,
+) -> Result<QuoteResponse, ApiError> {
     let scrape_start = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
     
-    tracing::info!("🚀 Sompo quote işlemi başlatıldı: request_id={}", request.quote_meta.request_id);
+    tracing::info!("🚀 Sompo quote işlemi başlatıldı (deneme {}): request_id={}", attempt + 1, request.quote_meta.request_id);
     
     // WebDriver client oluştur
     let client = create_webdriver_client(&config)
@@ -26,6 +56,12 @@ pub async fn fetch_sompo_quote(
     
     // Session manager
     let session_manager = SessionManager::new(&config.session_dir);
+    
+    // İlk denemede session temizle
+    if attempt == 0 {
+        session_manager.clear_session("sompo").ok();
+        tracing::info!("🧹 Session temizlendi, temiz başlangıç");
+    }
     
     // Login
     if let Err(e) = login_to_sompo(&client, config.clone(), &session_manager).await {
@@ -236,26 +272,34 @@ pub async fn fetch_sompo_quote(
                     tracing::info!("✅ {} ürünü butonu tıklandı", product_type);
                     product_selected = true;
                     
-                    // Sayfa/modal değişimini bekle
-                    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
-                    
-                    // URL değişti mi kontrol et
-                    if let Ok(new_url) = client.current_url().await {
-                        tracing::info!("📍 Ürün seçimi sonrası URL: {}", new_url);
-                    }
-                    
-                    // Modal kapandı mı kontrol et
-                    let js_check_modal = r#"
-                        const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content');
-                        const visibleModals = Array.from(modals).filter(m => {
-                            const style = window.getComputedStyle(m);
-                            return style.display !== 'none' && style.visibility !== 'hidden';
+                    // URL değişimini bekle (Playwright benzeri)
+                    let js_wait_navigation = r#"
+                        return new Promise((resolve) => {
+                            const initialUrl = window.location.href;
+                            let checks = 0;
+                            const interval = setInterval(() => {
+                                checks++;
+                                if (window.location.href !== initialUrl) {
+                                    clearInterval(interval);
+                                    resolve({ navigated: true, newUrl: window.location.href, after: checks * 250 });
+                                } else if (checks >= 40) {  // 10 saniye
+                                    clearInterval(interval);
+                                    resolve({ navigated: false, newUrl: window.location.href });
+                                }
+                            }, 250);
                         });
-                        return { modalCount: visibleModals.length };
                     "#;
                     
-                    if let Ok(modal_result) = client.execute(js_check_modal, vec![]).await {
-                        tracing::info!("🔧 Modal kontrolü: {:?}", modal_result);
+                    if let Ok(nav_result) = client.execute(js_wait_navigation, vec![]).await {
+                        tracing::info!("🔧 Navigation sonucu: {:?}", nav_result);
+                        if let Some(obj) = nav_result.as_object() {
+                            if obj.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                tracing::info!("✅ Sayfa değişti!");
+                                
+                                // Network idle bekle
+                                wait_for_network_idle(&client, 10).await.ok();
+                            }
+                        }
                     }
                 }
             }
@@ -265,36 +309,8 @@ pub async fn fetch_sompo_quote(
         }
     }
     
-    // Ürün seçildiyse, modal kapanana kadar bekle
+    // Ürün seçildiyse devam et (URL değişimi + network idle zaten beklendi)
     if product_selected {
-        tracing::info!("⏳ Modal kapanması bekleniyor...");
-        
-        for i in 0..20 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            
-            let js_check_modal_closed = r#"
-                const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content');
-                const visibleModals = Array.from(modals).filter(m => {
-                    const style = window.getComputedStyle(m);
-                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-                });
-                return visibleModals.length === 0;
-            "#;
-            
-            if let Ok(result) = client.execute(js_check_modal_closed, vec![]).await {
-                if result.as_bool().unwrap_or(false) {
-                    tracing::info!("✅ Modal kapandı! ({}.5 saniye sonra)", i / 2);
-                    break;
-                }
-            }
-            
-            if i == 19 {
-                tracing::warn!("⚠️ Modal kapanma timeout! 10 saniye beklendi.");
-            }
-        }
-        
-        // Sayfa yüklensin diye ek bekle
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
         tracing::info!("✅ Sayfa hazır, form doldurmaya başlanıyor");
     }
     
@@ -346,175 +362,206 @@ pub async fn fetch_sompo_quote(
         tracing::info!("📋 Sayfa durumu: {:?}", page_check);
     }
     
-    // Form doldurma - Plaka (JavaScript ile akıllıca bul)
+    // Form doldurma - Playwright-style (tek async fonksiyon)
     let plate = &request.vehicle.plate;
-    tracing::info!("🚗 Plaka: {}", plate);
-    
-    let js_fill_plate = format!(r#"
-        const plateValue = '{}';
-        
-        // Plaka input'unu akıllıca bul
-        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([disabled])'));
-        
-        for (const input of inputs) {{
-            const name = (input.name || '').toLowerCase();
-            const id = (input.id || '').toLowerCase();
-            const placeholder = (input.placeholder || '').toLowerCase();
-            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-            
-            // Plaka ile ilgili input'u bul
-            if (name.includes('plaka') || name.includes('plate') ||
-                id.includes('plaka') || id.includes('plate') ||
-                placeholder.includes('plaka') || placeholder.includes('plate') ||
-                label.includes('plaka')) {{
-                
-                input.focus();
-                input.value = plateValue;
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                
-                return {{ 
-                    found: true, 
-                    name: input.name, 
-                    id: input.id, 
-                    placeholder: input.placeholder 
-                }};
-            }}
-        }}
-        
-        return {{ found: false }};
-    "#, plate);
-    
-    let mut plate_filled = false;
-    match client.execute(&js_fill_plate, vec![]).await {
-        Ok(result) => {
-            tracing::info!("🔧 Plaka JavaScript sonucu: {:?}", result);
-            if let Some(obj) = result.as_object() {
-                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    tracing::info!("✅ Plaka dolduruldu (JavaScript)");
-                    plate_filled = true;
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!("⚠️ Plaka JavaScript hatası: {}", e);
-        }
-    }
-    
-    if !plate_filled {
-        tracing::warn!("⚠️ Plaka input bulunamadı");
-    }
-    
-    // TCKN doldur (JavaScript ile akıllıca bul)
     let tckn = &request.insured.tckn;
-    tracing::info!("🔑 TCKN: {}", tckn);
     
-    let js_fill_tckn = format!(r#"
-        const tcknValue = '{}';
-        
-        // TCKN input'unu akıllıca bul
-        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([disabled])'));
-        
-        for (const input of inputs) {{
-            const name = (input.name || '').toLowerCase();
-            const id = (input.id || '').toLowerCase();
-            const placeholder = (input.placeholder || '').toLowerCase();
-            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+    tracing::info!("📝 Form dolduruluyor: Plaka={}, TCKN={}", plate, tckn);
+    
+    let js_fill_form = format!(r#"
+        (async function fillForm() {{
+            const data = {{ plaka: null, tckn: null }};
             
-            // TCKN/TC/Kimlik ile ilgili input'u bul
-            if (name.includes('tckn') || name.includes('tcno') || name.includes('kimlik') ||
-                id.includes('tckn') || id.includes('tcno') || id.includes('kimlik') ||
-                placeholder.includes('tckn') || placeholder.includes('tc') || placeholder.includes('kimlik') ||
-                label.includes('tckn') || label.includes('tc kimlik')) {{
-                
-                input.focus();
-                input.value = tcknValue;
-                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                
-                return {{ 
-                    found: true, 
-                    name: input.name, 
-                    id: input.id, 
-                    placeholder: input.placeholder 
-                }};
+            // Tüm görünür input'ları al
+            const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
+            const visibleInputs = inputs.filter(inp => inp.offsetParent !== null && !inp.disabled);
+            
+            // 1. Plaka
+            const plateSelectors = [
+                'input[name*="plak"]', 'input[name*="plate"]',
+                'input[placeholder*="lak"]', 'input[placeholder*="late"]',
+                'input#plaka', 'input#plate'
+            ];
+            
+            for (const sel of plateSelectors) {{
+                const inp = document.querySelector(sel);
+                if (inp && inp.offsetParent !== null && !inp.disabled) {{
+                    inp.focus();
+                    inp.value = '{}';
+                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    inp.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                    data.plaka = {{ selector: sel, name: inp.name }};
+                    break;
+                }}
             }}
-        }}
-        
-        return {{ found: false }};
-    "#, tckn);
+            
+            // Fallback: label'a göre ara
+            if (!data.plaka) {{
+                for (const inp of visibleInputs) {{
+                    const label = inp.labels?.[0]?.textContent?.toLowerCase() || '';
+                    const name = (inp.name || '').toLowerCase();
+                    const placeholder = (inp.placeholder || '').toLowerCase();
+                    
+                    if (label.includes('plaka') || name.includes('plak') || placeholder.includes('lak')) {{
+                        inp.focus();
+                        inp.value = '{}';
+                        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        data.plaka = {{ selector: 'fallback', name: inp.name }};
+                        break;
+                    }}
+                }}
+            }}
+            
+            // 2. TCKN
+            const tcknSelectors = [
+                'input[name*="tckn"]', 'input[name*="tcno"]', 'input[name*="kimlik"]',
+                'input[placeholder*="TCKN"]', 'input[placeholder*="TCK"]', 'input[placeholder*="Kimlik"]'
+            ];
+            
+            for (const sel of tcknSelectors) {{
+                const inp = document.querySelector(sel);
+                if (inp && inp.offsetParent !== null && !inp.disabled) {{
+                    inp.focus();
+                    inp.value = '{}';
+                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    inp.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                    data.tckn = {{ selector: sel, name: inp.name }};
+                    break;
+                }}
+            }}
+            
+            // Fallback: label'a göre ara
+            if (!data.tckn) {{
+                for (const inp of visibleInputs) {{
+                    const label = inp.labels?.[0]?.textContent?.toLowerCase() || '';
+                    const name = (inp.name || '').toLowerCase();
+                    const placeholder = (inp.placeholder || '').toLowerCase();
+                    
+                    if (label.includes('tc') || label.includes('kimlik') || 
+                        name.includes('tc') || placeholder.includes('tc')) {{
+                        inp.focus();
+                        inp.value = '{}';
+                        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        data.tckn = {{ selector: 'fallback', name: inp.name }};
+                        break;
+                    }}
+                }}
+            }}
+            
+            return data;
+        }})()
+    "#, plate, plate, tckn, tckn);
     
-    match client.execute(&js_fill_tckn, vec![]).await {
+    match client.execute(&js_fill_form, vec![]).await {
         Ok(result) => {
-            tracing::info!("🔧 TCKN JavaScript sonucu: {:?}", result);
+            tracing::info!("🔧 Form doldurma sonucu: {:?}", result);
             if let Some(obj) = result.as_object() {
-                if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    tracing::info!("✅ TCKN dolduruldu (JavaScript)");
+                if obj.get("plaka").and_then(|v| v.as_object()).is_some() {
+                    tracing::info!("✅ Plaka dolduruldu");
+                } else {
+                    tracing::warn!("⚠️ Plaka input bulunamadı");
+                }
+                
+                if obj.get("tckn").and_then(|v| v.as_object()).is_some() {
+                    tracing::info!("✅ TCKN dolduruldu");
                 } else {
                     tracing::warn!("⚠️ TCKN input bulunamadı");
                 }
             }
         }
         Err(e) => {
-            tracing::warn!("⚠️ TCKN JavaScript hatası: {}", e);
+            tracing::warn!("⚠️ Form doldurma hatası: {}", e);
         }
     }
     
-    // Ek alanlar (varsa)
+    // Ek alanlar (varsa) - Form'un işlenmesi için bekle
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     
-    // Form submit - CSS selectors ile dene
+    // Form submit - Playwright-style has-text() simülasyonu
+    tracing::info!("🔍 Submit butonu aranıyor...");
+    
+    let js_submit = r#"
+        (async function submitForm() {
+            // Playwright-style click fonksiyonu
+            function playwrightClick(element) {
+                element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                element.focus();
+                
+                const rect = element.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                
+                ['mousedown', 'mouseup', 'click'].forEach(eventType => {
+                    element.dispatchEvent(new MouseEvent(eventType, {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: x,
+                        clientY: y
+                    }));
+                });
+                
+                ['pointerdown', 'pointerup'].forEach(eventType => {
+                    element.dispatchEvent(new PointerEvent(eventType, {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: x,
+                        clientY: y
+                    }));
+                });
+                
+                element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+                element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+            }
+            
+            // has-text() simülasyonu: keywords
+            const keywords = ['teklif', 'sorgula', 'hesapla', 'devam'];
+            const buttons = Array.from(document.querySelectorAll('button:not([disabled]), input[type="submit"]'));
+            
+            // Görünür buttonları filtrele
+            const visibleButtons = buttons.filter(btn => btn.offsetParent !== null);
+            
+            for (const btn of visibleButtons) {
+                const text = (btn.textContent || btn.value || '').toLowerCase().trim();
+                
+                if (keywords.some(kw => text.includes(kw))) {
+                    playwrightClick(btn);
+                    
+                    // Response için bekle
+                    await new Promise(r => setTimeout(r, 2000));
+                    
+                    return { submitted: true, buttonText: text };
+                }
+            }
+            
+            return { submitted: false };
+        })()
+    "#;
+    
     let mut form_submitted = false;
-    for selector in SompoSelectors::FORM_SUBMIT_BUTTONS {
-        if let Ok(elem) = client.find(Locator::Css(selector)).await {
-            if let Ok(_) = elem.click().await {
-                tracing::info!("✅ Form submit edildi: {}", selector);
-                form_submitted = true;
-                break;
+    match client.execute(js_submit, vec![]).await {
+        Ok(result) => {
+            tracing::info!("🔧 Submit button sonucu: {:?}", result);
+            if let Some(obj) = result.as_object() {
+                if obj.get("submitted").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    let button_text = obj.get("buttonText").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    tracing::info!("✅ Form submit edildi: {}", button_text);
+                    form_submitted = true;
+                    
+                    // Network idle bekle
+                    wait_for_network_idle(&client, 15).await.ok();
+                } else {
+                    tracing::warn!("⚠️ Submit butonu bulunamadı");
+                }
             }
         }
-    }
-    
-    // CSS selectors başarısızsa, JavaScript ile button bul ve tıkla
-    if !form_submitted {
-        tracing::info!("🔍 CSS selectors başarısız, JavaScript ile button aranıyor...");
-        
-        let js_find_submit = r#"
-            // Teklif/Sorgula/Hesapla gibi buttonları bul
-            const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'submit'];
-            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn'));
-            
-            for (const btn of buttons) {
-                const text = btn.innerText || btn.value || '';
-                if (keywords.some(kw => text.toLowerCase().includes(kw))) {
-                    btn.click();
-                    return { found: true, text: text };
-                }
-            }
-            
-            // Form içindeki herhangi bir submit button
-            const formSubmit = document.querySelector('form button[type="submit"]');
-            if (formSubmit) {
-                formSubmit.click();
-                return { found: true, text: 'form[submit]' };
-            }
-            
-            return { found: false };
-        "#;
-        
-        match client.execute(js_find_submit, vec![]).await {
-            Ok(result) => {
-                tracing::info!("🔧 JavaScript button search sonucu: {:?}", result);
-                if let Some(obj) = result.as_object() {
-                    if obj.get("found").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        form_submitted = true;
-                        tracing::info!("✅ JavaScript ile form submit edildi!");
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("⚠️ JavaScript button search hatası: {}", e);
-            }
+        Err(e) => {
+            tracing::warn!("⚠️ Submit button hatası: {}", e);
         }
     }
     
@@ -585,4 +632,40 @@ pub async fn fetch_sompo_quote(
     
     result
 }
+
+// Helper: Network idle bekle (Playwright'ın wait_for_load_state("networkidle") benzeri)
+async fn wait_for_network_idle(
+    client: &fantoccini::Client,
+    timeout_secs: u64,
+) -> Result<(), ApiError> {
+    tracing::info!("⏳ Network idle bekleniyor...");
+    
+    for i in 0..(timeout_secs * 2) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        let js_check = r#"
+            return {
+                readyState: document.readyState,
+                activeRequests: performance.getEntriesByType('resource')
+                    .filter(r => !r.responseEnd).length
+            };
+        "#;
+        
+        if let Ok(result) = client.execute(js_check, vec![]).await {
+            if let Some(obj) = result.as_object() {
+                let ready_state = obj.get("readyState").and_then(|v| v.as_str()).unwrap_or("");
+                let active_reqs = obj.get("activeRequests").and_then(|v| v.as_u64()).unwrap_or(999);
+                
+                if ready_state == "complete" && active_reqs == 0 {
+                    tracing::info!("✅ Network idle! ({}.5 saniye)", i / 2);
+                    return Ok(());
+                }
+            }
+        }
+    }
+    
+    tracing::warn!("⚠️ Network idle timeout: {} saniye", timeout_secs);
+    Ok(()) // Timeout olsa bile devam et (strict değil)
+}
+
 
