@@ -895,6 +895,40 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     
     tracing::info!("📍 OTP sonrası URL: {}", post_otp_url);
     
+    // QR Kod Sıfırla popup'ını kontrol et ve kapat
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    
+    let js_check_and_close_popup = r#"
+        // QR Kod Sıfırla popup'ındaki "Hayır" butonunu bul
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const noButton = buttons.find(btn => 
+            btn.textContent.includes('Hayır') || 
+            btn.textContent.includes('HAYIR') ||
+            btn.textContent.toLowerCase().includes('hayır')
+        );
+        
+        if (noButton) {
+            noButton.click();
+            return 'popup_closed';
+        }
+        
+        return 'no_popup';
+    "#;
+    
+    match client.execute(js_check_and_close_popup, vec![]).await {
+        Ok(result) => {
+            if result.as_str() == Some("popup_closed") {
+                tracing::info!("✅ QR Kod Sıfırla popup'ı kapatıldı");
+                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+            } else {
+                tracing::debug!("ℹ️ QR Kod Sıfırla popup'ı bulunamadı");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ Popup kontrol hatası: {}", e);
+        }
+    }
+    
     // Hala OTP sayfasındaysa hata mesajı kontrol et
     if post_otp_url.as_str().contains("authenticator") {
         tracing::warn!("⚠️ Hala OTP sayfasında! Hata mesajı kontrol ediliyor...");
