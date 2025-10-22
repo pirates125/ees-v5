@@ -215,20 +215,64 @@ def main():
         except Exception as e:
             print(f"[WARNING] Yeni İş Teklifi butonu hatası: {str(e)[:100]}", file=sys.stderr)
         
-        # QR popup kapat (varsa)
-        try:
-            driver.execute_script("""
-                const qrPopup = document.querySelector('.p-dialog-header');
-                if (qrPopup && qrPopup.textContent.includes('QR Kod')) {
-                    const noButton = qrPopup.closest('.p-dialog').querySelector('button');
-                    if (noButton && noButton.textContent.includes('Hayır')) {
-                        noButton.click();
+        # QR popup ve diğer popup'ları agresif kapat
+        print(f"[INFO] Popup'lar kontrol ediliyor...", file=sys.stderr)
+        for i in range(3):  # 3 kez dene
+            try:
+                result = driver.execute_script("""
+                    let closed = [];
+                    
+                    // 1. QR Kod popup'ı kapat
+                    const qrHeaders = Array.from(document.querySelectorAll('.p-dialog-header'));
+                    for (const header of qrHeaders) {
+                        const text = header.textContent || '';
+                        if (text.includes('QR') || text.includes('Kod') || text.includes('Sıfır')) {
+                            const dialog = header.closest('.p-dialog');
+                            if (dialog) {
+                                // "Hayır" veya "Kapat" butonunu bul
+                                const buttons = dialog.querySelectorAll('button');
+                                for (const btn of buttons) {
+                                    const btnText = (btn.textContent || '').toLowerCase();
+                                    if (btnText.includes('hayır') || btnText.includes('kapat') || btnText.includes('iptal')) {
+                                        btn.click();
+                                        closed.push('QR_popup');
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
-            """)
-            time.sleep(1)
-        except:
-            pass
+                    
+                    // 2. Close icon'ları
+                    const closeButtons = document.querySelectorAll('.p-dialog-header-close, [aria-label="Close"]');
+                    for (const btn of closeButtons) {
+                        const dialog = btn.closest('.p-dialog');
+                        if (dialog && dialog.offsetParent !== null) {
+                            // Dialog görünür mü?
+                            const dialogText = (dialog.textContent || '').toLowerCase();
+                            // Eğer "teklif" içermiyorsa kapat (yanlış popup)
+                            if (!dialogText.includes('teklif al') && !dialogText.includes('trafik') && !dialogText.includes('kasko')) {
+                                btn.click();
+                                closed.push('unwanted_popup');
+                            }
+                        }
+                    }
+                    
+                    return {closed: closed, count: closed.length};
+                """)
+                
+                if result['count'] > 0:
+                    print(f"[INFO] {result['count']} popup kapatıldı: {result['closed']}", file=sys.stderr)
+                    time.sleep(2)  # Popup kapandıktan sonra bekle
+                else:
+                    print(f"[INFO] Kapatılacak popup yok (deneme {i+1})", file=sys.stderr)
+                    break
+                    
+            except Exception as e:
+                print(f"[WARNING] Popup kapatma hatası: {str(e)[:100]}", file=sys.stderr)
+        
+        # Asıl popup'ın içeriğini kontrol et
+        time.sleep(2)
         
         # Ürün seçimi (Trafik/Kasko) - JavaScript ile robust
         product_keywords = {
@@ -238,6 +282,26 @@ def main():
         keywords = product_keywords.get(product_type.lower(), ['trafik'])
         
         print(f"[INFO] Ürün seçiliyor: {product_type}", file=sys.stderr)
+        
+        # Popup içeriğini kontrol et
+        print(f"[INFO] Popup içeriği kontrol ediliyor...", file=sys.stderr)
+        try:
+            popup_content = driver.execute_script("""
+                const popups = Array.from(document.querySelectorAll('.p-dialog, [role="dialog"]'));
+                const visiblePopups = popups.filter(p => p.offsetParent !== null);
+                
+                return visiblePopups.map(popup => ({
+                    text: (popup.textContent || '').substring(0, 300),
+                    hasButtons: popup.querySelectorAll('button').length,
+                    visible: popup.offsetParent !== null
+                }));
+            """)
+            
+            print(f"[DEBUG] Açık popup sayısı: {len(popup_content)}", file=sys.stderr)
+            for i, popup in enumerate(popup_content):
+                print(f"  Popup {i+1}: {popup['hasButtons']} buton, text[:100]: {popup['text'][:100]}", file=sys.stderr)
+        except Exception as e:
+            print(f"[WARNING] Popup içerik kontrolü hatası: {str(e)[:100]}", file=sys.stderr)
         
         # Ürün butonlarının yüklenmesini bekle
         print(f"[INFO] Ürün butonları yükleniyor...", file=sys.stderr)
