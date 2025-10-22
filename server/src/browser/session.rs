@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
     pub cookies: Vec<Cookie>,
+    #[serde(default)]
+    pub local_storage: std::collections::HashMap<String, String>,
     pub timestamp: u64,
     pub valid_until: u64,
 }
@@ -56,7 +58,8 @@ impl SessionManager {
             return None;
         }
         
-        tracing::info!("Session yüklendi: {} ({} cookies)", provider, session.cookies.len());
+        tracing::info!("Session yüklendi: {} ({} cookies, {} localStorage items)", 
+            provider, session.cookies.len(), session.local_storage.len());
         Some(session)
     }
     

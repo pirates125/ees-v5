@@ -342,21 +342,76 @@ async fn check_otp_required(client: &Client) -> Result<bool, ApiError> {
     if current_url.as_str().contains("authenticator") {
         tracing::info!("✅ Google Authenticator URL tespit edildi!");
         
-        // Tüm input'ları listele
+        // Tüm input'ları listele (normal DOM + iframe + shadow DOM)
         let js_find_inputs = r#"
-            const inputs = Array.from(document.querySelectorAll('input'));
-            return inputs.map(inp => ({
-                type: inp.type,
-                name: inp.name,
-                id: inp.id,
-                placeholder: inp.placeholder,
-                class: inp.className
-            }));
+            function findAllInputs() {
+                const inputs = [];
+                
+                // 1. Normal DOM
+                const normalInputs = Array.from(document.querySelectorAll('input'));
+                normalInputs.forEach(inp => {
+                    inputs.push({
+                        type: inp.type,
+                        name: inp.name,
+                        id: inp.id,
+                        placeholder: inp.placeholder,
+                        class: inp.className,
+                        location: 'normal_dom'
+                    });
+                });
+                
+                // 2. iframe'ler içinde
+                const iframes = document.querySelectorAll('iframe');
+                iframes.forEach((iframe, idx) => {
+                    try {
+                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                        const iframeInputs = Array.from(iframeDoc.querySelectorAll('input'));
+                        iframeInputs.forEach(inp => {
+                            inputs.push({
+                                type: inp.type,
+                                name: inp.name,
+                                id: inp.id,
+                                placeholder: inp.placeholder,
+                                class: inp.className,
+                                location: 'iframe_' + idx
+                            });
+                        });
+                    } catch (e) {
+                        // Cross-origin iframe
+                    }
+                });
+                
+                // 3. Shadow DOM (recursive)
+                function findInShadow(root, path) {
+                    const shadowInputs = Array.from(root.querySelectorAll('input'));
+                    shadowInputs.forEach(inp => {
+                        inputs.push({
+                            type: inp.type,
+                            name: inp.name,
+                            id: inp.id,
+                            placeholder: inp.placeholder,
+                            class: inp.className,
+                            location: 'shadow_' + path
+                        });
+                    });
+                    
+                    const allNodes = root.querySelectorAll('*');
+                    allNodes.forEach((node, idx) => {
+                        if (node.shadowRoot) {
+                            findInShadow(node.shadowRoot, path + '_' + idx);
+                        }
+                    });
+                }
+                findInShadow(document, 'root');
+                
+                return inputs;
+            }
+            return findAllInputs();
         "#;
         
         match client.execute(js_find_inputs, vec![]).await {
             Ok(result) => {
-                tracing::info!("📋 Sayfadaki tüm input'lar: {:?}", result);
+                tracing::info!("📋 Sayfadaki tüm input'lar (DOM + iframe + shadow): {:?}", result);
             }
             Err(e) => {
                 tracing::warn!("Input listesi alınamadı: {}", e);
@@ -415,10 +470,37 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
         }
     }
     
-    // Tüm input'ları say (6 ayrı input olabilir)
+    // Tüm input'ları say (6 ayrı input olabilir) - iframe ve shadow DOM dahil
     let js_count_inputs = r#"
-        const inputs = document.querySelectorAll('input');
-        return inputs.length;
+        function countAllInputs() {
+            let count = document.querySelectorAll('input').length;
+            
+            // iframe içindeki input'lar
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    count += iframeDoc.querySelectorAll('input').length;
+                } catch (e) {}
+            });
+            
+            // Shadow DOM içindeki input'lar
+            function countInShadow(root) {
+                let shadowCount = 0;
+                const allNodes = root.querySelectorAll('*');
+                allNodes.forEach(node => {
+                    if (node.shadowRoot) {
+                        shadowCount += node.shadowRoot.querySelectorAll('input').length;
+                        shadowCount += countInShadow(node.shadowRoot);
+                    }
+                });
+                return shadowCount;
+            }
+            count += countInShadow(document);
+            
+            return count;
+        }
+        return countAllInputs();
     "#;
     
     let input_count = match client.execute(js_count_inputs, vec![]).await {
@@ -435,9 +517,47 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
             tracing::info!("🔢 6+ input tespit edildi, tek tek doldurma deneniyor...");
             
             let js_fill_separate = format!(r#"
-                const inputs = Array.from(document.querySelectorAll('input'));
+                function findAllOtpInputs() {{
+                    const inputs = [];
+                    
+                    // 1. Normal DOM
+                    inputs.push(...Array.from(document.querySelectorAll('input')));
+                    
+                    // 2. iframe içinde
+                    const iframes = document.querySelectorAll('iframe');
+                    iframes.forEach(iframe => {{
+                        try {{
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                            inputs.push(...Array.from(iframeDoc.querySelectorAll('input')));
+                        }} catch (e) {{
+                            // Cross-origin iframe
+                        }}
+                    }});
+                    
+                    // 3. Shadow DOM içinde (recursive)
+                    function findInShadow(root) {{
+                        const shadowInputs = [];
+                        shadowInputs.push(...Array.from(root.querySelectorAll('input')));
+                        
+                        const allNodes = root.querySelectorAll('*');
+                        allNodes.forEach(node => {{
+                            if (node.shadowRoot) {{
+                                shadowInputs.push(...findInShadow(node.shadowRoot));
+                            }}
+                        }});
+                        
+                        return shadowInputs;
+                    }}
+                    inputs.push(...findInShadow(document));
+                    
+                    return inputs;
+                }}
+                
+                const inputs = findAllOtpInputs();
                 const code = '{}';
                 let filled = 0;
+                
+                console.log('📊 Toplam input bulundu:', inputs.length);
                 
                 for (let i = 0; i < Math.min(inputs.length, code.length); i++) {{
                     const input = inputs[i];
@@ -467,7 +587,7 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                     inputs[inputs.length - 1].focus();
                 }}
                 
-                return filled;
+                return {{ filled: filled, total: inputs.length }};
             "#, totp);
             
             match client.execute(&js_fill_separate, vec![]).await {
@@ -691,6 +811,43 @@ async fn save_current_session(client: &Client, session_manager: &SessionManager)
         })
         .collect();
     
+    // LocalStorage'ı al (Python kodundan gelen özellik)
+    let js_get_local_storage = r#"
+        try {
+            const items = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                items[key] = localStorage.getItem(key);
+            }
+            return JSON.stringify(items);
+        } catch (e) {
+            return JSON.stringify({});
+        }
+    "#;
+    
+    let local_storage = match client.execute(js_get_local_storage, vec![]).await {
+        Ok(result) => {
+            if let Some(json_str) = result.as_str() {
+                match serde_json::from_str::<std::collections::HashMap<String, String>>(json_str) {
+                    Ok(map) => {
+                        tracing::info!("💾 LocalStorage alındı: {} items", map.len());
+                        map
+                    }
+                    Err(e) => {
+                        tracing::warn!("LocalStorage parse hatası: {}", e);
+                        std::collections::HashMap::new()
+                    }
+                }
+            } else {
+                std::collections::HashMap::new()
+            }
+        }
+        Err(e) => {
+            tracing::warn!("LocalStorage alınamadı: {}", e);
+            std::collections::HashMap::new()
+        }
+    };
+    
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -701,6 +858,7 @@ async fn save_current_session(client: &Client, session_manager: &SessionManager)
     
     let session = SessionData {
         cookies,
+        local_storage,
         timestamp: now,
         valid_until,
     };
@@ -741,6 +899,33 @@ async fn restore_session(client: &Client, session: &SessionData, base_url: &str)
         
         if let Err(e) = client.execute(&script, vec![]).await {
             tracing::warn!("Cookie set edilemedi: {:?}", e);
+        }
+    }
+    
+    // LocalStorage'ı yükle (Python kodundan gelen özellik)
+    if !session.local_storage.is_empty() {
+        let local_storage_json = serde_json::to_string(&session.local_storage)
+            .unwrap_or_else(|_| "{}".to_string());
+        
+        let js_set_local_storage = format!(r#"
+            try {{
+                const data = {};
+                for (const [key, value] of Object.entries(data)) {{
+                    localStorage.setItem(key, value);
+                }}
+                return true;
+            }} catch (e) {{
+                return false;
+            }}
+        "#, local_storage_json);
+        
+        match client.execute(&js_set_local_storage, vec![]).await {
+            Ok(_) => {
+                tracing::info!("💾 LocalStorage yüklendi: {} items", session.local_storage.len());
+            }
+            Err(e) => {
+                tracing::warn!("LocalStorage yüklenemedi: {}", e);
+            }
         }
     }
     
