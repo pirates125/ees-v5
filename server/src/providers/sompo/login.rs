@@ -415,7 +415,86 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
         }
     }
     
-    // Önce genel input selector'ları dene
+    // Tüm input'ları say (6 ayrı input olabilir)
+    let js_count_inputs = r#"
+        const inputs = document.querySelectorAll('input');
+        return inputs.length;
+    "#;
+    
+    let input_count = match client.execute(js_count_inputs, vec![]).await {
+        Ok(result) => {
+            tracing::info!("📊 Sayfada {} input bulundu", result);
+            result
+        }
+        Err(_) => serde_json::Value::Number(serde_json::Number::from(0))
+    };
+    
+    // Eğer 6 input varsa, tek tek doldurmak gerekebilir (Google Authenticator UI pattern)
+    if let Some(count) = input_count.as_u64() {
+        if count >= 6 {
+            tracing::info!("🔢 6+ input tespit edildi, tek tek doldurma deneniyor...");
+            
+            let js_fill_separate = format!(r#"
+                const inputs = Array.from(document.querySelectorAll('input'));
+                const code = '{}';
+                let filled = 0;
+                for (let i = 0; i < Math.min(inputs.length, code.length); i++) {{
+                    inputs[i].value = code[i];
+                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    inputs[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    filled++;
+                }}
+                return filled;
+            "#, totp);
+            
+            match client.execute(&js_fill_separate, vec![]).await {
+                Ok(result) => {
+                    tracing::info!("✅ {} input JavaScript ile dolduruldu: {:?}", count, result);
+                    
+                    // Enter tuşu bas (son input'a)
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    let js_press_enter = r#"
+                        const inputs = document.querySelectorAll('input');
+                        if (inputs.length > 0) {
+                            const lastInput = inputs[inputs.length - 1];
+                            lastInput.focus();
+                            const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                            lastInput.dispatchEvent(event);
+                            return true;
+                        }
+                        return false;
+                    "#;
+                    
+                    if let Ok(_) = client.execute(js_press_enter, vec![]).await {
+                        tracing::info!("⌨️ Enter tuşu JavaScript ile basıldı");
+                    }
+                    
+                    // OTP submit butonu kontrolü geç, doğrulama bekle
+                    tracing::info!("⏳ OTP doğrulaması bekleniyor...");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+                    
+                    // OTP sonrası URL kontrol et
+                    let post_otp_url = client.current_url().await
+                        .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+                    
+                    tracing::info!("📍 OTP sonrası URL (6 input yöntemi): {}", post_otp_url);
+                    
+                    if post_otp_url.as_str().contains("authenticator") {
+                        tracing::warn!("⚠️ 6 input yöntemi başarısız, standart yönteme geçiliyor...");
+                    } else {
+                        tracing::info!("✅ OTP doğrulaması başarılı (6 input yöntemi)!");
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ JavaScript ile doldurma başarısız: {}", e);
+                }
+            }
+        }
+    }
+    
+    // Standart yöntem: Tek bir input'a tüm kodu gir
+    tracing::info!("🔍 Tek input'a tüm kodu girme deneniyor...");
     let generic_selectors = [
         "input[type='text']",
         "input[type='tel']",
@@ -466,6 +545,49 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     tracing::info!("⏳ OTP doğrulaması bekleniyor...");
     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
     
+    // OTP sonrası URL ve sayfa durumunu kontrol et
+    let post_otp_url = client.current_url().await
+        .map_err(|e| ApiError::WebDriverError(format!("URL alınamadı: {}", e)))?;
+    
+    tracing::info!("📍 OTP sonrası URL: {}", post_otp_url);
+    
+    // Hala OTP sayfasındaysa hata mesajı kontrol et
+    if post_otp_url.as_str().contains("authenticator") {
+        tracing::warn!("⚠️ Hala OTP sayfasında! Hata mesajı kontrol ediliyor...");
+        
+        // Sayfa metnini al
+        if let Ok(body) = client.find(Locator::Css("body")).await {
+            if let Ok(body_text) = body.text().await {
+                tracing::info!("📝 OTP sayfası metni: {}", 
+                    body_text.lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .join(" | "));
+                
+                // Hata mesajı var mı?
+                let lowercase = body_text.to_lowercase();
+                if lowercase.contains("hatalı") || 
+                   lowercase.contains("yanlış") || 
+                   lowercase.contains("geçersiz") ||
+                   lowercase.contains("incorrect") {
+                    tracing::error!("❌ OTP hatalı! Sayfa metni: {}", body_text);
+                    return Err(ApiError::LoginFailed("OTP doğrulama başarısız - kod hatalı veya süresi dolmuş".to_string()));
+                }
+            }
+        }
+        
+        // Screenshot al
+        if let Ok(screenshot) = client.screenshot().await {
+            if let Ok(_) = std::fs::write("sompo_otp_failed.png", screenshot) {
+                tracing::info!("💾 OTP başarısız screenshot'u: sompo_otp_failed.png");
+            }
+        }
+        
+        return Err(ApiError::LoginFailed("OTP doğrulama başarısız - hala OTP sayfasında".to_string()));
+    }
+    
+    tracing::info!("✅ OTP doğrulaması başarılı!");
     Ok(())
 }
 
