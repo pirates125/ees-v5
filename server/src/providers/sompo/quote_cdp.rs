@@ -172,21 +172,120 @@ async fn handle_otp_cdp(
         
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
         
-        // Submit button (varsa)
-        if let Ok(submit_btn) = page.find_element("button[type='submit']").await {
-            submit_btn.click().await.ok();
-            tracing::info!("✅ OTP submit edildi");
-            
-            // Navigation bekle
-            wait_for_navigation(page, 10).await.ok();
-            wait_for_network_idle(page, 5).await.ok();
-            
-            // Dashboard'a ulaştık mı?
-            if let Ok(Some(url)) = page.url().await {
-                if url.contains("dashboard") && !url.contains("authenticator") {
-                    tracing::info!("✅ OTP başarılı! Dashboard'a ulaşıldı");
-                    return Ok(());
+        // AGRESIF SUBMIT - 5 farklı yöntem!
+        tracing::info!("🔍 OTP submit deneniyor (agresif mod)...");
+        
+        // Yöntem 1: Multiple selector patterns ile submit button ara
+        let submit_selectors = vec![
+            "button[type='submit']",
+            "button.submit-btn",
+            "button.otp-submit",
+            ".submit-button",
+            "input[type='submit']",
+        ];
+        
+        let mut button_found = false;
+        for selector in submit_selectors {
+            if let Ok(btn) = page.find_element(selector).await {
+                if btn.click().await.is_ok() {
+                    tracing::info!("✅ Submit button tıklandı ({})", selector);
+                    button_found = true;
+                    break;
                 }
+            }
+        }
+        
+        // Yöntem 2: JavaScript ile agresif button arama
+        if !button_found {
+            tracing::info!("🔧 JavaScript ile submit button aranıyor...");
+            
+            let js_submit = r#"
+                // Keywords: doğrula, onayla, gönder, submit
+                const keywords = ['doğrula', 'onayla', 'gönder', 'submit', 'devam'];
+                const buttons = Array.from(document.querySelectorAll('button:not([disabled]), input[type="submit"]'));
+                
+                for (const btn of buttons) {
+                    const text = (btn.textContent || btn.value || '').toLowerCase().trim();
+                    if (keywords.some(kw => text.includes(kw))) {
+                        btn.click();
+                        return { clicked: true, text: text };
+                    }
+                }
+                
+                // Fallback: Herhangi bir submit type button
+                const anySubmit = document.querySelector('button[type="submit"], input[type="submit"]');
+                if (anySubmit) {
+                    anySubmit.click();
+                    return { clicked: true, text: 'fallback_submit' };
+                }
+                
+                return { clicked: false };
+            "#;
+            
+            if let Ok(result) = page.evaluate(js_submit).await {
+                tracing::info!("JS submit sonucu: {:?}", result);
+                if let Ok(value) = result.into_value::<serde_json::Value>() {
+                    if let Some(obj_map) = value.as_object() {
+                        if obj_map.get("clicked").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            button_found = true;
+                            tracing::info!("✅ JavaScript submit başarılı!");
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Yöntem 3: Enter tuşu gönder (son input'a)
+        if !button_found {
+            tracing::info!("⌨️ Enter tuşu gönderiliyor...");
+            
+            let js_press_enter = r#"
+                const inputs = Array.from(document.querySelectorAll('input[type="text"]:not([disabled])'))
+                    .filter(inp => inp.offsetParent !== null);
+                
+                if (inputs.length > 0) {
+                    const lastInput = inputs[inputs.length - 1];
+                    lastInput.focus();
+                    
+                    // Enter tuşu simüle et
+                    const enterEvent = new KeyboardEvent('keydown', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    lastInput.dispatchEvent(enterEvent);
+                    
+                    return { pressed: true };
+                }
+                return { pressed: false };
+            "#;
+            
+            if let Ok(result) = page.evaluate(js_press_enter).await {
+                tracing::info!("Enter tuşu sonucu: {:?}", result);
+            }
+        }
+        
+        // Yöntem 4: Navigation bekle (auto-submit olabilir)
+        tracing::info!("⏳ Navigation bekleniyor (auto-submit için)...");
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        
+        // Navigation kontrolü
+        wait_for_navigation(page, 10).await.ok();
+        wait_for_network_idle(page, 5).await.ok();
+        
+        // Dashboard'a ulaştık mı kontrol et
+        if let Ok(Some(url)) = page.url().await {
+            tracing::info!("📍 OTP sonrası URL: {}", url);
+            
+            if url.contains("dashboard") && !url.contains("authenticator") {
+                tracing::info!("✅ OTP başarılı! Dashboard'a ulaşıldı");
+                return Ok(());
+            } else if !url.contains("authenticator") {
+                // Başka bir sayfaya gittiyse (captcha, bot detection vb.)
+                tracing::info!("⚠️ Beklenmeyen sayfa: {}", url);
             }
         }
     }
