@@ -136,76 +136,89 @@ pub async fn fetch_sompo_quote(
     // Ürün sayfasına git (Trafik/Kasko seçimi)
     tracing::info!("🔍 {} ürünü seçiliyor (modal/popup içinde aranıyor)...", product_type);
     
-    // JavaScript ile ürün seçimi - modal içinde "Trafik" kartını bul
+    // JavaScript ile ürün seçimi - Playwright-style click ile
     let js_select_product = format!(r#"
         const productName = '{}';
         
-        // 1. Modal içindeki TÜM "TEKLİF AL" butonlarını bul ve yakınında "trafik" olup olmadığına bak
+        // Playwright-style click function (daha güçlü)
+        function playwrightClick(element) {{
+            // 1. Scroll into view
+            element.scrollIntoView({{ block: 'center', behavior: 'smooth' }});
+            
+            // 2. Focus
+            element.focus();
+            
+            // 3. Mouse events (Playwright sırası)
+            const rect = element.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            
+            ['mousedown', 'mouseup', 'click'].forEach(eventType => {{
+                element.dispatchEvent(new MouseEvent(eventType, {{
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: x,
+                    clientY: y
+                }}));
+            }});
+            
+            // 4. Pointer events (modern)
+            ['pointerdown', 'pointerup'].forEach(eventType => {{
+                element.dispatchEvent(new PointerEvent(eventType, {{
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: x,
+                    clientY: y
+                }}));
+            }});
+            
+            // 5. Enter key fallback
+            element.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', bubbles: true }}));
+            element.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', bubbles: true }}));
+        }}
+        
+        // Modal içinde "Trafik" kartını bul
         const modals = document.querySelectorAll('[role="dialog"], .modal, .popup, .p-dialog, .p-overlay-content, .p-sidebar');
         
         for (const modal of modals) {{
-            // Modal içindeki tüm butonları al
             const buttons = Array.from(modal.querySelectorAll('button:not([disabled])'));
             
             for (const btn of buttons) {{
                 const btnText = (btn.textContent || btn.innerText || '').toLowerCase().trim();
                 
-                // "TEKLİF AL" butonu mu?
                 if (btnText.includes('teklif') || btnText.includes('al')) {{
-                    // Bu butonun container'ında (parent/grandparent) "trafik" kelimesi var mı?
                     let container = btn.parentElement;
                     let depth = 0;
                     
                     while (container && depth < 7) {{
                         const containerText = (container.textContent || container.innerText || '').toLowerCase();
                         
-                        // Container'da "trafik" var mı? (ama yanlış şeyler yok mu?)
                         if (containerText.includes(productName) && 
                             !containerText.includes('kamyon') &&
                             !containerText.includes('paket') &&
                             !containerText.includes('indirim') &&
-                            containerText.length < 200) {{ // Çok uzun container'ları atla
+                            containerText.length < 200) {{
                             
-                            // Bu container içinde kaç "teklif al" butonu var?
                             const buttonsInContainer = container.querySelectorAll('button');
                             
-                            // Container çok küçükse (sadece bu ürüne ait), tıkla!
                             if (buttonsInContainer.length <= 3) {{
-                                btn.click();
+                                // Playwright-style click!
+                                playwrightClick(btn);
+                                
                                 return {{ 
                                     found: true, 
                                     text: containerText.substring(0, 50), 
                                     buttonText: btnText,
                                     depth: depth,
-                                    location: 'modal_smart_search'
+                                    clickMethod: 'playwright_style'
                                 }};
                             }}
                         }}
                         
                         container = container.parentElement;
                         depth++;
-                    }}
-                }}
-            }}
-        }}
-        
-        // 2. Fallback: İlk yaklaşım - "Trafik" başlığı + yakınındaki buton
-        for (const modal of modals) {{
-            const allText = Array.from(modal.querySelectorAll('*'));
-            
-            for (const elem of allText) {{
-                const text = (elem.textContent || elem.innerText || '').trim().toLowerCase();
-                
-                // Sadece "trafik" yazıyor mu? (başlık olabilir)
-                if (text === productName) {{
-                    // Yakınındaki ilk butonu bul
-                    const nearbyButton = 
-                        elem.nextElementSibling?.querySelector('button') ||
-                        elem.parentElement?.querySelector('button');
-                    
-                    if (nearbyButton) {{
-                        nearbyButton.click();
-                        return {{ found: true, text: text, location: 'modal_nearby_button' }};
                     }}
                 }}
             }}
