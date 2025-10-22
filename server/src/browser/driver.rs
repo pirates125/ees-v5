@@ -13,8 +13,17 @@ pub async fn create_webdriver_client(config: &Config) -> Result<Client, fantocci
         "--no-sandbox".to_string(),
         "--disable-dev-shm-usage".to_string(),
         "--disable-gpu".to_string(),
-        "--window-size=1366,768".to_string(),
+        "--window-size=1920,1080".to_string(),  // Daha yaygın çözünürlük
         format!("--lang={}", config.accept_language.split(',').next().unwrap_or("tr-TR")),
+        "--disable-web-security".to_string(),
+        "--disable-features=IsolateOrigins,site-per-process".to_string(),
+        "--disable-site-isolation-trials".to_string(),
+        // Bot detection'a karşı ek ayarlar
+        "--disable-features=VizDisplayCompositor".to_string(),
+        "--disable-blink-features=AutomationControlled".to_string(),
+        "--exclude-switches=enable-automation".to_string(),
+        "--disable-infobars".to_string(),
+        "--start-maximized".to_string(),
     ];
     
     if config.headless {
@@ -51,21 +60,49 @@ pub async fn create_webdriver_client(config: &Config) -> Result<Client, fantocci
         .connect(&config.webdriver_url)
         .await?;
     
-    // User agent override
-    let user_agent_script = format!(
+    // Advanced anti-detection scripts
+    let anti_detection_script = format!(
         r#"
+        // WebDriver property'sini gizle
         Object.defineProperty(navigator, 'webdriver', {{
             get: () => undefined
         }});
+        
+        // User Agent override
         Object.defineProperty(navigator, 'userAgent', {{
             get: () => '{}'
+        }});
+        
+        // Chrome runtime'ı ekle (bot detection için)
+        window.navigator.chrome = {{
+            runtime: {{}}
+        }};
+        
+        // Permissions API
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({{ state: Notification.permission }}) :
+                originalQuery(parameters)
+        );
+        
+        // Plugin array (gerçek tarayıcı gibi)
+        Object.defineProperty(navigator, 'plugins', {{
+            get: () => [1, 2, 3, 4, 5]
+        }});
+        
+        // Languages
+        Object.defineProperty(navigator, 'languages', {{
+            get: () => ['tr-TR', 'tr', 'en-US', 'en']
         }});
         "#,
         config.user_agent
     );
     
-    if let Err(e) = client.execute(&user_agent_script, vec![]).await {
-        tracing::warn!("User agent override başarısız: {:?}", e);
+    if let Err(e) = client.execute(&anti_detection_script, vec![]).await {
+        tracing::warn!("⚠️ Anti-detection script başarısız: {:?}", e);
+    } else {
+        tracing::info!("✅ Anti-detection script uygulandı");
     }
     
     tracing::info!("WebDriver bağlantısı başarılı");
