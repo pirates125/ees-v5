@@ -279,49 +279,84 @@ async def main():
             except:
                 pass
             
-            # Trafik/Kasko linki ara
-            print(f"[INFO] {product_type.capitalize()} linki aranıyor...", file=sys.stderr)
+            # "YENİ İŞ TEKLİFİ" butonuna tıkla (modal açılır)
+            print(f"[INFO] YENİ İŞ TEKLİFİ butonuna tıklanıyor...", file=sys.stderr)
             
-            # Ürün linklerini dene - daha esnek
-            link_clicked = False
-            
-            # JavaScript ile ara
-            js_find_link = f"""
-                const keywords = ['{product_type}', '{product_type.capitalize()}', 'Trafik', 'TRAFIK'];
-                const elements = Array.from(document.querySelectorAll('a, button, .card, [role="button"]'));
-                
-                for (const el of elements) {{
-                    const text = (el.textContent || el.innerText || '').toLowerCase();
+            js_new_offer = """
+                (() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const newOfferBtn = buttons.find(b => 
+                        b.offsetParent !== null && 
+                        (b.textContent || '').toLowerCase().includes('yeni iş teklifi')
+                    );
                     
-                    if (keywords.some(kw => text.includes(kw.toLowerCase())) && 
-                        !text.includes('yenileme') && 
-                        !text.includes('bilgilendirme') &&
-                        el.offsetParent !== null) {{
-                        
-                        el.scrollIntoView({{block: 'center'}});
-                        el.click();
-                        
-                        return {{
-                            success: true,
-                            text: text.substring(0, 80),
-                            tag: el.tagName
-                        }};
-                    }}
-                }}
-                
-                return {{success: false}};
+                    if (newOfferBtn) {
+                        newOfferBtn.scrollIntoView({block: 'center'});
+                        newOfferBtn.click();
+                        return {success: true};
+                    }
+                    
+                    return {success: false};
+                })()
             """
             
             try:
-                result = await page.evaluate(js_find_link)
+                result = await page.evaluate(js_new_offer)
                 if result.get('success'):
-                    print(f"[INFO] Ürün linki tıklandı: {result.get('text', 'unknown')}", file=sys.stderr)
+                    print(f"[INFO] YENİ İŞ TEKLİFİ tıklandı ✅", file=sys.stderr)
+                    await page.wait_for_timeout(2000)
+                else:
+                    print(f"[WARNING] YENİ İŞ TEKLİFİ butonu bulunamadı", file=sys.stderr)
+            except Exception as e:
+                print(f"[WARNING] YENİ İŞ TEKLİFİ hatası: {str(e)[:100]}", file=sys.stderr)
+            
+            # Modal açılınca Trafik/Kasko seç
+            print(f"[INFO] Modal'da {product_type.capitalize()} seçiliyor...", file=sys.stderr)
+            
+            js_select_product = f"""
+                (() => {{
+                    const productType = '{product_type}';
+                    
+                    // Modal içindeki tüm elementleri ara
+                    const allElements = Array.from(document.querySelectorAll('div, button, a, span'));
+                    
+                    for (const el of allElements) {{
+                        const text = (el.textContent || '').toLowerCase().trim();
+                        
+                        // "Trafik" veya "Kasko" yazısını içeren element
+                        if (text === productType || text.includes(productType)) {{
+                            // Tıklanabilir mi?
+                            if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.onclick || el.getAttribute('role') === 'button') {{
+                                el.scrollIntoView({{block: 'center'}});
+                                el.click();
+                                return {{success: true, text: text.substring(0, 50)}};
+                            }}
+                            
+                            // Parent'ı dene
+                            const parent = el.parentElement;
+                            if (parent && (parent.tagName === 'BUTTON' || parent.tagName === 'A' || parent.onclick)) {{
+                                parent.scrollIntoView({{block: 'center'}});
+                                parent.click();
+                                return {{success: true, text: text.substring(0, 50)}};
+                            }}
+                        }}
+                    }}
+                    
+                    return {{success: false}};
+                }})()
+            """
+            
+            link_clicked = False
+            try:
+                result = await page.evaluate(js_select_product)
+                if result.get('success'):
+                    print(f"[INFO] {product_type.capitalize()} seçildi: {result.get('text', 'unknown')}", file=sys.stderr)
                     link_clicked = True
                     await page.wait_for_timeout(3000)
                 else:
-                    print(f"[WARNING] JavaScript ile ürün linki bulunamadı", file=sys.stderr)
+                    print(f"[WARNING] Modal'da {product_type} bulunamadı", file=sys.stderr)
             except Exception as e:
-                print(f"[WARNING] Link arama hatası: {str(e)[:100]}", file=sys.stderr)
+                print(f"[WARNING] Ürün seçimi hatası: {str(e)[:100]}", file=sys.stderr)
             
             # Sayfa yüklensin
             await page.wait_for_load_state("networkidle", timeout=10000)
@@ -354,43 +389,45 @@ async def main():
             
             # JavaScript ile form doldur
             js_fill_form = f"""
-                const plate = '{plate}';
-                const tckn = '{tckn}';
-                
-                const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
-                const visibleInputs = inputs.filter(i => i.offsetParent !== null && !i.disabled);
-                
-                let plataDone = false;
-                let tcknDone = false;
-                
-                for (const inp of visibleInputs) {{
-                    const placeholder = (inp.placeholder || '').toLowerCase();
-                    const name = (inp.name || '').toLowerCase();
-                    const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
+                (() => {{
+                    const plate = '{plate}';
+                    const tckn = '{tckn}';
                     
-                    // Plaka
-                    if (!plataDone && (placeholder.includes('plak') || name.includes('plak') || label.includes('plak'))) {{
-                        inp.focus();
-                        inp.value = plate;
-                        inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                        inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                        plataDone = true;
-                        continue;
+                    const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'));
+                    const visibleInputs = inputs.filter(i => i.offsetParent !== null && !i.disabled);
+                    
+                    let plataDone = false;
+                    let tcknDone = false;
+                    
+                    for (const inp of visibleInputs) {{
+                        const placeholder = (inp.placeholder || '').toLowerCase();
+                        const name = (inp.name || '').toLowerCase();
+                        const label = inp.labels && inp.labels[0] ? inp.labels[0].textContent.toLowerCase() : '';
+                        
+                        // Plaka
+                        if (!plataDone && (placeholder.includes('plak') || name.includes('plak') || label.includes('plak'))) {{
+                            inp.focus();
+                            inp.value = plate;
+                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            plataDone = true;
+                            continue;
+                        }}
+                        
+                        // TCKN
+                        if (!tcknDone && (placeholder.includes('tc') || name.includes('tc') || label.includes('tc') || 
+                                          placeholder.includes('kimlik') || name.includes('kimlik') || placeholder.includes('vkn'))) {{
+                            inp.focus();
+                            inp.value = tckn;
+                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            tcknDone = true;
+                            continue;
+                        }}
                     }}
                     
-                    // TCKN
-                    if (!tcknDone && (placeholder.includes('tc') || name.includes('tc') || label.includes('tc') || 
-                                      placeholder.includes('kimlik') || name.includes('kimlik'))) {{
-                        inp.focus();
-                        inp.value = tckn;
-                        inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                        inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                        tcknDone = true;
-                        continue;
-                    }}
-                }}
-                
-                return {{plaka: plataDone, tckn: tcknDone}};
+                    return {{plaka: plataDone, tckn: tcknDone}};
+                }})()
             """
             
             try:
@@ -432,25 +469,27 @@ async def main():
             
             # JavaScript ile submit button bul ve tıkla
             js_submit = """
-                const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'ara'];
-                const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
-                const visibleButtons = buttons.filter(b => b.offsetParent !== null);
-                
-                for (const btn of visibleButtons) {
-                    const text = (btn.textContent || btn.innerText || '').toLowerCase();
+                (() => {
+                    const keywords = ['teklif', 'sorgula', 'hesapla', 'devam', 'ara'];
+                    const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
+                    const visibleButtons = buttons.filter(b => b.offsetParent !== null);
                     
-                    if (keywords.some(kw => text.includes(kw))) {
-                        btn.scrollIntoView({block: 'center'});
-                        btn.click();
+                    for (const btn of visibleButtons) {
+                        const text = (btn.textContent || btn.innerText || '').toLowerCase();
                         
-                        return {
-                            success: true,
-                            text: text.substring(0, 50)
-                        };
+                        if (keywords.some(kw => text.includes(kw))) {
+                            btn.scrollIntoView({block: 'center'});
+                            btn.click();
+                            
+                            return {
+                                success: true,
+                                text: text.substring(0, 50)
+                            };
+                        }
                     }
-                }
-                
-                return {success: false};
+                    
+                    return {success: false};
+                })()
             """
             
             submit_clicked = False
@@ -501,37 +540,39 @@ async def main():
             
             # JavaScript ile fiyat bul - en yüksek değer
             js_find_price = """
-                const tlRegex = /(\\d{1,3}(\\.\\d{3})*(,\\d{2})?\\s*(TL|₺))/g;
-                const elements = Array.from(document.querySelectorAll('div, span, p, td, [class*="prem"], [class*="prim"], [class*="price"], [class*="fiyat"]'));
-                
-                let maxPrice = 0;
-                let maxPriceText = '';
-                
-                for (const el of elements) {
-                    if (el.offsetParent !== null) {
-                        const text = el.textContent || '';
-                        const matches = text.match(tlRegex);
-                        
-                        if (matches && matches.length > 0) {
-                            for (const match of matches) {
-                                // TL fiyatı parse et
-                                const cleanedMatch = match.replace(/TL|₺/g, '').replace(/\\./g, '').replace(',', '.').trim();
-                                const price = parseFloat(cleanedMatch);
-                                
-                                if (price > 100 && price < 100000 && price > maxPrice) {
-                                    maxPrice = price;
-                                    maxPriceText = match;
+                (() => {
+                    const tlRegex = /(\\d{1,3}(\\.\\d{3})*(,\\d{2})?\\s*(TL|₺))/g;
+                    const elements = Array.from(document.querySelectorAll('div, span, p, td, [class*="prem"], [class*="prim"], [class*="price"], [class*="fiyat"]'));
+                    
+                    let maxPrice = 0;
+                    let maxPriceText = '';
+                    
+                    for (const el of elements) {
+                        if (el.offsetParent !== null) {
+                            const text = el.textContent || '';
+                            const matches = text.match(tlRegex);
+                            
+                            if (matches && matches.length > 0) {
+                                for (const match of matches) {
+                                    // TL fiyatı parse et
+                                    const cleanedMatch = match.replace(/TL|₺/g, '').replace(/\\./g, '').replace(',', '.').trim();
+                                    const price = parseFloat(cleanedMatch);
+                                    
+                                    if (price > 100 && price < 100000 && price > maxPrice) {
+                                        maxPrice = price;
+                                        maxPriceText = match;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                
-                return {
-                    success: maxPrice > 0,
-                    price: maxPriceText,
-                    value: maxPrice
-                };
+                    
+                    return {
+                        success: maxPrice > 0,
+                        price: maxPriceText,
+                        value: maxPrice
+                    };
+                })()
             """
             
             price = 0.0
