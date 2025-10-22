@@ -594,11 +594,24 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
                     return visibleInputs;
                 }}
                 
-                const inputs = findAllOtpInputs();
+                const allInputs = findAllOtpInputs();
                 const code = '{}';
                 let filled = 0;
                 
-                console.log('📊 Toplam input bulundu:', inputs.length);
+                // Normal DOM'daki input'ları tercih et (shadow DOM duplicate olabilir)
+                const normalDomInputs = Array.from(document.querySelectorAll('input[type="text"]')).filter(inp => {{
+                    if (inp.type === 'hidden' || inp.disabled || inp.readOnly) return false;
+                    const style = window.getComputedStyle(inp);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = inp.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return false;
+                    return true;
+                }});
+                
+                // Eğer normal DOM'da yeterli input varsa onu kullan, yoksa tümünü kullan
+                const inputs = normalDomInputs.length >= 6 ? normalDomInputs.slice(0, 6) : allInputs.slice(0, 6);
+                
+                console.log('📊 Toplam:', allInputs.length, '| Normal DOM:', normalDomInputs.length, '| Kullanılacak:', inputs.length);
                 
                 for (let i = 0; i < Math.min(inputs.length, code.length); i++) {{
                     const input = inputs[i];
