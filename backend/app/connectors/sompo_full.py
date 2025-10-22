@@ -70,25 +70,66 @@ def main():
             By.XPATH, 
             '/html/body/div[1]/div/div[1]/div[2]/form/div[1]/div/input'
         )
+        username_input.clear()
         username_input.send_keys(username)
+        print(f"[INFO] Username girildi: {username}", file=sys.stderr)
+        
+        # Validation
+        input_value = username_input.get_attribute('value')
+        if input_value != username:
+            print(f"[WARNING] Username validation failed! Expected: {username}, Got: {input_value}", file=sys.stderr)
         
         # Password
         password_input = driver.find_element(
             By.XPATH,
             '/html/body/div[1]/div/div[1]/div[2]/form/div[2]/div/div/input'
         )
+        password_input.clear()
         password_input.send_keys(password)
+        print(f"[INFO] Password girildi (len={len(password)})", file=sys.stderr)
+        
+        # Password validation
+        pwd_value = password_input.get_attribute('value')
+        if len(pwd_value) != len(password):
+            print(f"[WARNING] Password validation failed! Expected len: {len(password)}, Got: {len(pwd_value)}", file=sys.stderr)
         
         # Login button
         login_btn = driver.find_element(By.XPATH, '//button[@type="submit"]')
         login_btn.click()
         print(f"[INFO] Login button tıklandı", file=sys.stderr)
         
+        # Screenshot al (debug)
+        time.sleep(2)
+        driver.save_screenshot("debug_after_login_click.png")
+        print(f"[DEBUG] Screenshot: debug_after_login_click.png", file=sys.stderr)
+        
         # URL değişimini bekle
         login_url = "https://ejento.somposigorta.com.tr/dashboard/login"
-        WebDriverWait(driver, 15).until(
-            lambda d: d.current_url != login_url
-        )
+        try:
+            WebDriverWait(driver, 20).until(
+                lambda d: d.current_url != login_url
+            )
+            print(f"[INFO] URL değişti!", file=sys.stderr)
+        except Exception as e:
+            # Timeout - ne oldu?
+            final_url = driver.current_url
+            driver.save_screenshot("debug_login_timeout.png")
+            print(f"[ERROR] URL değişmedi (timeout)! Current URL: {final_url}", file=sys.stderr)
+            print(f"[DEBUG] Timeout screenshot: debug_login_timeout.png", file=sys.stderr)
+            
+            # Sayfa içeriği logla
+            print(f"[DEBUG] Page title: {driver.title}", file=sys.stderr)
+            
+            # Error mesajı var mı?
+            try:
+                errors = driver.find_elements(By.CSS_SELECTOR, '.error, .alert, .message')
+                for err in errors:
+                    if err.is_displayed():
+                        print(f"[DEBUG] Error element: {err.text[:100]}", file=sys.stderr)
+            except:
+                pass
+            
+            raise
         
         time.sleep(2)
         current_url = driver.current_url
