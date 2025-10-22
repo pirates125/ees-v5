@@ -543,14 +543,38 @@ async fn handle_otp(client: &Client, secret_key: &str) -> Result<(), ApiError> {
     tracing::debug!("   Düzeltilmiş zaman: {}", corrected_time);
     tracing::debug!("   NOT: TOTP time-based'dir. Sunucu saati NTP ile sync olmalı!");
     
-    // TOTP kodu üret (düzeltilmiş zamanla)
-    let time_offset_u64 = if time_offset < 0 {
-        0u64.wrapping_sub((-time_offset) as u64)
-    } else {
-        time_offset as u64
+    // TOTP kodları üret (şu anki + önceki + sonraki time window)
+    // Time window = 30 saniye, TOTP standardı ±1 window toleransına izin verir
+    
+    // Şu anki zaman (saniye cinsinden)
+    let current_time_step = corrected_time / 30;
+    
+    // 3 farklı time window için TOTP üret
+    let totp_prev = {
+        let t = (current_time_step.saturating_sub(1)) * 30;
+        let offset = if time_offset < 0 { (t as i64 + time_offset) as u64 } else { t + time_offset as u64 };
+        totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, offset)
     };
-    let totp = totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, time_offset_u64);
-    tracing::info!("🔢 OTP kodu üretildi: {}", totp);
+    
+    let totp_current = {
+        let t = current_time_step * 30;
+        let offset = if time_offset < 0 { (t as i64 + time_offset) as u64 } else { t + time_offset as u64 };
+        totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, offset)
+    };
+    
+    let totp_next = {
+        let t = (current_time_step + 1) * 30;
+        let offset = if time_offset < 0 { (t as i64 + time_offset) as u64 } else { t + time_offset as u64 };
+        totp_lite::totp_custom::<totp_lite::Sha1>(30, 6, &secret_bytes, offset)
+    };
+    
+    tracing::info!("🔢 OTP kodları (±1 time window):");
+    tracing::info!("   Önceki (-30s): {}", totp_prev);
+    tracing::info!("   Şu anki:       {}", totp_current);
+    tracing::info!("   Sonraki (+30s): {}", totp_next);
+    
+    // Önce şu anki kodu dene
+    let totp = totp_current;
     
     // Screenshot al (OTP ekranı)
     if let Ok(screenshot) = client.screenshot().await {
